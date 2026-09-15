@@ -28,7 +28,6 @@
     -webkit-font-smoothing:antialiased;
     overflow-x:hidden;
   }
-  /* 背景网格 + 光晕 */
   body::before{
     content:'';position:fixed;inset:0;z-index:-2;pointer-events:none;
     background:
@@ -37,7 +36,6 @@
       linear-gradient(rgba(130,150,170,.045) 1px, transparent 1px) 0 0/100% 46px,
       linear-gradient(90deg, rgba(130,150,170,.045) 1px, transparent 1px) 0 0/46px 100%;
   }
-  /* 扫描线 */
   body::after{
     content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.22;
     background:repeating-linear-gradient(0deg, rgba(0,0,0,.6) 0 1px, transparent 1px 3px);
@@ -45,7 +43,6 @@
 
   .wrap{max-width:1260px;margin:0 auto}
 
-  /* ============ 头部 ============ */
   .hud{
     display:flex;align-items:flex-end;justify-content:space-between;
     gap:18px;flex-wrap:wrap;
@@ -72,7 +69,6 @@
   .stats .hot b{color:var(--red)}
   .stats .soon b{color:var(--yellow)}
 
-  /* ============ 面板 ============ */
   .panel{
     position:relative;background:var(--panel);
     border:1px solid var(--line);
@@ -97,7 +93,6 @@
     grid-template-columns:minmax(140px,1.7fr) 110px 92px 92px 104px 96px 178px 32px;
   }
 
-  /* ============ 表头 ============ */
   .thead{
     height:42px;padding:0 16px;
     font-size:10.5px;letter-spacing:.16em;color:var(--dim);
@@ -112,7 +107,6 @@
   .thead > div:nth-child(6){text-align:right}
   .thead > div:nth-child(7){text-align:right}
 
-  /* ============ 数据行 ============ */
   .trow{
     padding:0 16px;min-height:58px;
     border-bottom:1px solid rgba(255,255,255,.045);
@@ -126,7 +120,6 @@
 
   .cell{min-width:0}
 
-  /* 输入控件 */
   .inp{
     width:100%;font:inherit;font-size:13px;
     color:var(--txt);background:transparent;
@@ -162,7 +155,6 @@
   }
   select.inp option{background:#12161a;color:var(--txt)}
 
-  /* 剩余容量 + 进度条 */
   .remain-val{
     font-family:var(--mono);font-size:13px;text-align:right;
     font-variant-numeric:tabular-nums;color:#b6bfc7;
@@ -177,7 +169,6 @@
     transition:width .35s ease, background .35s ease;
   }
 
-  /* 倒计时 */
   .cd{text-align:right;padding-right:2px}
   .cd-time{
     font-family:var(--mono);font-size:17px;font-weight:600;
@@ -200,7 +191,6 @@
   }
   .cd-time.urgent{animation:urgent 1s steps(1,end) infinite}
 
-  /* 删除按钮 */
   .del{
     width:26px;height:26px;display:grid;place-items:center;
     background:transparent;border:1px solid var(--line);
@@ -209,13 +199,11 @@
   }
   .del:hover{border-color:var(--red);color:var(--red);background:rgba(255,90,82,.1)}
 
-  /* 空状态 */
   .empty{
     padding:54px 20px;text-align:center;
     color:var(--dim);font-size:12.5px;letter-spacing:.18em;
   }
 
-  /* ============ 工具栏 ============ */
   .toolbar{
     display:flex;align-items:center;gap:18px;flex-wrap:wrap;
     margin-top:18px;
@@ -306,6 +294,11 @@
   /* ================= 数据 ================= */
   let rows = load() || seed();
 
+  // 保证每一行都有时间锚点
+  rows.forEach(function (r) {
+    if (typeof r.ts !== 'number' || !isFinite(r.ts) || r.ts <= 0) r.ts = Date.now();
+  });
+
   function uid() {
     return 'r' + Math.random().toString(36).slice(2, 10);
   }
@@ -316,10 +309,11 @@
   function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
 
   function seed() {
+    const t = Date.now();
     return [
-      { id: uid(), name: '源石碎片', region: 'gudi',   prod: 24, cons: 6,  stock: 52000 },
-      { id: uid(), name: '碳素结晶', region: 'wuling', prod: 15, cons: 15, stock: 30000 },
-      { id: uid(), name: '精密零件', region: 'gudi',   prod: 8,  cons: 20, stock: 40000 }
+      { id: uid(), name: '源石碎片', region: 'gudi',   prod: 24, cons: 6,  stock: 52000, ts: t },
+      { id: uid(), name: '碳素结晶', region: 'wuling', prod: 15, cons: 15, stock: 30000, ts: t },
+      { id: uid(), name: '精密零件', region: 'gudi',   prod: 8,  cons: 20, stock: 40000, ts: t }
     ];
   }
 
@@ -336,7 +330,8 @@
           region: r && LIMITS[r.region] ? r.region : 'gudi',
           prod: num(r && r.prod),
           cons: num(r && r.cons),
-          stock: num(r && r.stock)
+          stock: num(r && r.stock),
+          ts: (r && typeof r.ts === 'number' && r.ts > 0) ? r.ts : Date.now()
         };
       });
     } catch (e) {
@@ -350,24 +345,35 @@
     } catch (e) { /* 忽略隐私模式等异常 */ }
   }
 
+  /* ================= 核心：按时间锚点推算当前存量 ================= */
+  function currentStock(row) {
+    const prod = Math.max(0, num(row.prod));
+    const cons = Math.max(0, num(row.cons));
+    const net  = prod - cons;
+    const base = Math.max(0, num(row.stock));
+    const ts   = (typeof row.ts === 'number' && row.ts > 0) ? row.ts : Date.now();
+    const elapsed = Math.max(0, (Date.now() - ts) / 1000);
+    return Math.max(0, base + net * elapsed / 60);
+  }
+
   /* ================= 计算 ================= */
   function compute(row) {
-    const cap   = LIMITS[row.region] || LIMITS.gudi;
-    const stock = Math.max(0, num(row.stock));
-    const prod  = Math.max(0, num(row.prod));
-    const cons  = Math.max(0, num(row.cons));
-    const net   = prod - cons;
-    const raw   = cap - stock;
-    const remain = Math.max(0, raw);
+    const cap  = LIMITS[row.region] || LIMITS.gudi;
+    const prod = Math.max(0, num(row.prod));
+    const cons = Math.max(0, num(row.cons));
+    const net  = prod - cons;
+
+    const stock  = currentStock(row);
+    const remain = Math.max(0, cap - stock);
 
     let state = 'idle';
     let seconds = null;
 
-    if (raw <= 0) {
+    if (remain <= 0) {
       state = 'full';
     } else if (net > 0) {
       state = 'filling';
-      seconds = remain / net * 60;   // 速率单位为「/分钟」→ 秒
+      seconds = remain / net * 60;   // 速率单位「/分钟」→ 秒
     } else if (net === 0) {
       state = 'idle';
     } else {
@@ -450,13 +456,31 @@
     el.addEventListener('input', function (e) {
       const k = e.target.dataset.k;
       if (!k) return;
+
       if (k === 'name') {
         row.name = e.target.value;
-      } else if (k === 'region') {
-        row.region = e.target.value;
       } else {
-        row[k] = e.target.value === '' ? 0 : num(e.target.value);
+        // 关键：任何数值/地区变更前，先把时间推进到「现在」，
+        // 并把此刻的真实存量固化为新的基准值，避免历史时间丢失。
+        const frozen = currentStock(row);
+        row.ts = Date.now();
+        row.stock = Math.round(frozen * 100) / 100;
+
+        if (k === 'region') {
+          row.region = e.target.value;
+        } else if (k === 'stock') {
+          row.stock = e.target.value === '' ? 0 : num(e.target.value);
+        } else {
+          row[k] = e.target.value === '' ? 0 : num(e.target.value);
+        }
+
+        // 编辑其它字段时，同步刷新存量输入框的显示值
+        if (k !== 'stock') {
+          const stockInput = el.querySelector('[data-k="stock"]');
+          if (stockInput) stockInput.value = row.stock;
+        }
       }
+
       save();
       paint(el, row);
       paintStats();
@@ -535,7 +559,7 @@
 
   /* ================= 事件 ================= */
   addBtn.addEventListener('click', function () {
-    rows.push({ id: uid(), name: '', region: 'gudi', prod: 0, cons: 0, stock: 0 });
+    rows.push({ id: uid(), name: '', region: 'gudi', prod: 0, cons: 0, stock: 0, ts: Date.now() });
     save();
     render();
     const last = rowsEl.lastElementChild;
@@ -556,6 +580,11 @@
   /* ================= 启动 ================= */
   render();
   setInterval(tick, 1000);
+
+  // 页面从后台切回时立即刷新一次，避免节流导致的跳秒
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) tick();
+  });
 })();
 </script>
 </body>
