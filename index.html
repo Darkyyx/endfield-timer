@@ -154,14 +154,10 @@
   .handle:hover{color:var(--yellow);border-color:var(--line);background:rgba(255,210,30,.08)}
   .handle:active{cursor:grabbing;color:var(--yellow)}
 
-  /* ===== 名称列：图标 + 下拉框 ===== */
+  /* ===== 名称列：图标 + 纯文本 / 下拉框 ===== */
   .name-cell{
     display:flex;align-items:center;gap:11px;
     min-width:0;
-    cursor:default;
-    caret-color:transparent;
-    user-select:none;
-    -webkit-user-select:none;
   }
   .item-icon{
     width:38px;height:38px;flex:0 0 auto;
@@ -172,9 +168,6 @@
     background-repeat:no-repeat;
     position:relative;
     cursor:default;
-    caret-color:transparent;
-    user-select:none;
-    -webkit-user-select:none;
     transition:border-color .15s ease, background-color .15s ease;
   }
   .name-cell:hover .item-icon{border-color:rgba(255,210,30,.35)}
@@ -189,18 +182,34 @@
   }
   .item-icon.is-empty::after{opacity:1}
 
+  /* 查看态显示的纯文本 */
+  .name-cell .view-text{
+    flex:1 1 auto;min-width:0;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    cursor:text;
+  }
   .name-cell select.inp{flex:1 1 auto;min-width:0;cursor:pointer}
+
+  /* 地区列 */
+  .region-cell{min-width:0}
+  .region-cell .view-text{
+    display:block;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    cursor:text;
+  }
+  .region-cell select.inp{width:100%}
+
+  /* 显隐切换：查看态显示文本，编辑态显示下拉框 */
+  .trow:not(.is-editing) .name-cell select.inp,
+  .trow:not(.is-editing) .region-cell select.inp{display:none}
+  .trow.is-editing .name-cell .view-text,
+  .trow.is-editing .region-cell .view-text{display:none}
 
   /* 账号列：纯文本输入 */
   .inp.account{
     font-weight:400;
     letter-spacing:.02em;
     color:#c3ccd4;
-  }
-  .trow:not(.is-editing) .inp.account:empty::before,
-  .trow:not(.is-editing) .inp.account[value=""]::before{
-    content:'—';
-    color:#4a545e;
   }
 
   /* 输入控件 */
@@ -226,15 +235,10 @@
   .inp.num::-webkit-outer-spin-button,
   .inp.num::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 
-  /* ===== 所有下拉框：彻底隐藏文本插入符 ===== */
+  /* ===== 下拉框（编辑态使用） ===== */
   select.inp{
     appearance:none;-webkit-appearance:none;cursor:pointer;
     padding-right:26px;
-    caret-color:transparent !important;
-    color:transparent;
-    text-shadow:0 0 0 var(--txt);
-    user-select:none;
-    -webkit-user-select:none;
     background-image:
       linear-gradient(45deg,transparent 50%,var(--dim) 50%),
       linear-gradient(135deg,var(--dim) 50%,transparent 50%);
@@ -243,30 +247,23 @@
     background-repeat:no-repeat;
   }
   select.inp option{background:#12161a;color:var(--txt)}
-  select.inp:disabled{
-    color:var(--txt);
-    text-shadow:none;
-    opacity:1;
-    -webkit-text-fill-color:var(--txt);
-    cursor:default;
-  }
+  select.inp:disabled{color:var(--txt);opacity:1;-webkit-text-fill-color:var(--txt);cursor:default}
 
-  /* ===== 查看态：把输入控件伪装成纯文本 ===== */
-  .trow:not(.is-editing) .inp{
+  /* ===== 查看态：input 只读但可选中复制 ===== */
+  .trow:not(.is-editing) input.inp{
     border-bottom-color:transparent;
-    pointer-events:none;
-    cursor:default;
     background:transparent;
+    cursor:text;
+    user-select:text;
+    -webkit-user-select:text;
+    pointer-events:auto;
   }
-  .trow:not(.is-editing) .inp:hover{border-bottom-color:transparent}
-  .trow:not(.is-editing) select.inp{
-    background-image:none;
-    padding-right:8px;
+  .trow:not(.is-editing) input.inp:hover{
+    border-bottom-color:transparent;
   }
-  /* 查看态整行不出现文本光标 */
-  .trow:not(.is-editing),
-  .trow:not(.is-editing) .name-cell{
-    cursor:default;
+  .trow:not(.is-editing) input.inp:focus{
+    border-bottom-color:transparent;
+    background:transparent;
   }
 
   /* 剩余容量 + 进度条 */
@@ -461,6 +458,10 @@
     return ICON_DIR + encodeURIComponent(name) + ICON_EXT;
   }
 
+  function regionLabel(v) {
+    return v === 'gudi' ? '四号谷地' : '武陵';
+  }
+
   /* ================= 数据 ================= */
   const ITEMS = getItems();
 
@@ -473,7 +474,6 @@
     r.stock = Math.max(0, Math.floor(r.stock));
     r.editing = !!r.editing;
     if (typeof r.account !== 'string') r.account = '';
-    // 名称归一化：不在配置里的名称，一律回退到第一个物品
     if (typeof r.name !== 'string' || ITEMS.indexOf(r.name) < 0) {
       r.name = ITEMS[0];
     }
@@ -533,7 +533,6 @@
   }
 
   /* ================= 核心：按时间锚点推算当前存量 ================= */
-  /* 存量被钳制在 [0, 地区上限]，封顶后不再增长 */
   function currentStock(row) {
     const cap  = LIMITS[row.region] || LIMITS.gudi;
     const prod = Math.max(0, num(row.prod));
@@ -630,7 +629,6 @@
     el.className = 'grid trow';
     el.dataset.id = row.id;
 
-    // 名称下拉选项（来自 items.js）
     const nameOpts = ITEMS.map(function (n) {
       return '<option value="' + escAttr(n) + '">' + escAttr(n) + '</option>';
     }).join('');
@@ -639,13 +637,17 @@
       '<div class="cell"><div class="handle" draggable="true" title="按住拖动排序">⠿</div></div>' +
       '<div class="cell name-cell">' +
         '<div class="item-icon" data-icon></div>' +
+        '<span class="view-text" data-k="name-view"></span>' +
         '<select class="inp sel" data-k="name">' + nameOpts + '</select>' +
       '</div>' +
       '<div class="cell"><input class="inp account" data-k="account" maxlength="32" value="' + escAttr(row.account) + '"></div>' +
-      '<div class="cell"><select class="inp sel" data-k="region">' +
-        '<option value="wuling">武陵</option>' +
-        '<option value="gudi">四号谷地</option>' +
-      '</select></div>' +
+      '<div class="cell region-cell">' +
+        '<span class="view-text" data-k="region-view"></span>' +
+        '<select class="inp sel" data-k="region">' +
+          '<option value="wuling">武陵</option>' +
+          '<option value="gudi">四号谷地</option>' +
+        '</select>' +
+      '</div>' +
       '<div class="cell"><input class="inp num" type="number" min="0" step="0.01" data-k="prod" value="' + row.prod + '"></div>' +
       '<div class="cell"><input class="inp num" type="number" min="0" step="0.01" data-k="cons" value="' + row.cons + '"></div>' +
       '<div class="cell"><input class="inp num" type="number" min="0" step="1" data-k="stock" value="' + row.stock + '"></div>' +
@@ -663,11 +665,12 @@
         '<button class="ico del" type="button" title="删除">✕</button>' +
       '</div>';
 
-    // 设置名称、地区下拉的当前值
+    // 同步下拉与纯文本视图
     el.querySelector('[data-k="name"]').value = row.name;
     el.querySelector('[data-k="region"]').value = row.region;
+    el.querySelector('[data-k="name-view"]').textContent = row.name;
+    el.querySelector('[data-k="region-view"]').textContent = regionLabel(row.region);
 
-    // 设置图标
     applyIcon(el, row.name);
 
     const stockInput = el.querySelector('[data-k="stock"]');
@@ -694,16 +697,14 @@
     el.addEventListener('input', function (e) {
       const k = e.target.dataset.k;
       if (!k) return;
-      if (e.target.tagName === 'SELECT') return;   // select 交给 change 处理
+      if (e.target.tagName === 'SELECT') return;
 
-      // 账号：纯文本，直接更新即可，不涉及存量时间锚点
       if (k === 'account') {
         row.account = e.target.value;
         save();
         return;
       }
 
-      // 改动数字前，先冻结「此刻真实存量」为新基准（已受上限钳制）
       const frozen = Math.max(0, Math.floor(currentStock(row)));
 
       if (k === 'stock') {
@@ -737,21 +738,24 @@
       const k = e.target.dataset.k;
       if (k !== 'name' && k !== 'region') return;
 
-      // 名称切换：只更新名称和图标
       if (k === 'name') {
         row.name = e.target.value;
         applyIcon(el, row.name);
+        const v = el.querySelector('[data-k="name-view"]');
+        if (v) v.textContent = row.name;
         save();
         return;
       }
 
-      // 地区切换：需要冻结存量作为新基准（因为上限变了）
       row.stock = Math.max(0, Math.floor(currentStock(row)));
       row.ts = Date.now();
       row.region = e.target.value;
       if (document.activeElement !== stockInput) {
         stockInput.value = String(row.stock);
       }
+      const v = el.querySelector('[data-k="region-view"]');
+      if (v) v.textContent = regionLabel(row.region);
+
       save();
       paint(el, row);
       paintStats();
@@ -887,13 +891,22 @@
       btn.classList.toggle('on', on);
     }
 
-    el.querySelectorAll('.inp').forEach(function (inp) {
+    // input：查看态只读但可选中复制；编辑态可改
+    el.querySelectorAll('input.inp').forEach(function (inp) {
+      inp.readOnly = !on;
       inp.tabIndex = on ? 0 : -1;
     });
 
+    // select：仅编辑态可用
     el.querySelectorAll('select.inp').forEach(function (s) {
       s.disabled = !on;
     });
+
+    // 纯文本视图同步
+    const nameView = el.querySelector('[data-k="name-view"]');
+    if (nameView) nameView.textContent = row.name;
+    const regionView = el.querySelector('[data-k="region-view"]');
+    if (regionView) regionView.textContent = regionLabel(row.region);
   }
 
   function toggleEditing(el, row) {
@@ -1014,7 +1027,6 @@
     rows.push(row);
     save();
     render();
-    // 不再自动聚焦，避免 select 聚焦时渲染插入符
   });
 
   clearBtn.addEventListener('click', function () {
