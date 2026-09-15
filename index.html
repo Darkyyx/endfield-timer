@@ -214,11 +214,19 @@
   .inp.num::-webkit-outer-spin-button,
   .inp.num::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 
+  /* ===== 所有下拉框：彻底隐藏文本插入符 ===== */
+  /*
+    做法：把文字颜色设为透明，让插入符无色；
+    再用 text-shadow 把文字颜色「画」回来，视觉完全不变。
+    这样比单纯 caret-color: transparent 更可靠，
+    Chromium / Firefox 都不再出现闪烁光标。
+  */
   select.inp{
     appearance:none;-webkit-appearance:none;cursor:pointer;
     padding-right:26px;
-    caret-color:transparent;
-    text-indent:0.01px;
+    caret-color:transparent !important;
+    color:transparent;
+    text-shadow:0 0 0 var(--txt);
     user-select:none;
     -webkit-user-select:none;
     background-image:
@@ -229,7 +237,14 @@
     background-repeat:no-repeat;
   }
   select.inp option{background:#12161a;color:var(--txt)}
-  select.inp:disabled{color:var(--txt);opacity:1;-webkit-text-fill-color:var(--txt);cursor:default}
+  /* 禁用态：元素不可聚焦，恢复常规文本渲染 */
+  select.inp:disabled{
+    color:var(--txt);
+    text-shadow:none;
+    opacity:1;
+    -webkit-text-fill-color:var(--txt);
+    cursor:default;
+  }
 
   /* ===== 查看态：把输入控件伪装成纯文本 ===== */
   .trow:not(.is-editing) .inp{
@@ -250,7 +265,6 @@
   }
 
   /* 剩余容量 + 进度条 */
-  /* 进度条绝对定位，不占单元格高度，数字与其他列垂直居中对齐 */
   .cell.remain{position:relative}
   .remain-val{
     font-family:var(--mono);font-size:15.5px;text-align:right;
