@@ -158,6 +158,7 @@
   .name-cell{
     display:flex;align-items:center;gap:11px;
     min-width:0;
+    cursor:default;
   }
   .item-icon{
     width:38px;height:38px;flex:0 0 auto;
@@ -167,7 +168,9 @@
     background-position:center;
     background-repeat:no-repeat;
     position:relative;
-    cursor:default;
+    pointer-events:none;        /* 关键：点击/悬停穿透，不触发任何焦点 */
+    user-select:none;
+    -webkit-user-select:none;
     transition:border-color .15s ease, background-color .15s ease;
   }
   .name-cell:hover .item-icon{border-color:rgba(255,210,30,.35)}
