@@ -316,7 +316,7 @@
   .st-draining .cd-time{color:var(--cyan);text-shadow:0 0 16px rgba(79,208,224,.32)}
   .st-draining .cd-eta{color:#4d6a72}
 
-  /* 已封顶：红色警示 */
+  /* 已爆仓：红色警示 */
   .st-full .cd-time{color:var(--red);text-shadow:0 0 16px rgba(255,90,82,.3)}
 
   /* 已耗尽 / 产销平衡：静默灰 */
@@ -413,7 +413,7 @@
           <div>消耗/分</div>
           <div>当前存量</div>
           <div>剩余容量</div>
-          <div>封顶倒计时</div>
+          <div>倒计时</div>
           <div></div>
         </div>
         <div id="rows"></div>
@@ -987,14 +987,14 @@
 
     if (c.state === 'full') {
       el.classList.add('st-full');
-      cdTime.textContent = '已封顶';
+      cdTime.textContent = '已爆仓';
       cdSub.textContent = '上限 ' + fmtNum(c.cap);
       cdEta.textContent = '';
     } else if (c.state === 'filling') {
       el.classList.add('st-filling');
       cdTime.textContent = fmtDur(c.seconds);
       cdSub.textContent = '净 +' + fmtRate(c.net) + ' /分';
-      cdEta.textContent = '封顶 ' + fmtEta(new Date(Date.now() + c.seconds * 1000));
+      cdEta.textContent = '爆仓 ' + fmtEta(new Date(Date.now() + c.seconds * 1000));
       if (c.seconds < 1800) cdTime.classList.add('urgent');
     } else if (c.state === 'draining') {
       el.classList.add('st-draining');
@@ -1025,8 +1025,8 @@
     });
     statsEl.innerHTML =
       '<span>产物 <b>' + rows.length + '</b></span>' +
-      '<span class="hot">已封顶 <b>' + full + '</b></span>' +
-      '<span class="soon">1h 内封顶 <b>' + soon + '</b></span>' +
+      '<span class="hot">已爆仓 <b>' + full + '</b></span>' +
+      '<span class="soon">1h 内爆仓 <b>' + soon + '</b></span>' +
       '<span class="drain">1h 内耗尽 <b>' + drain + '</b></span>';
   }
 
