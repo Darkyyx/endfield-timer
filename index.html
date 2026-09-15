@@ -42,7 +42,7 @@
     background:repeating-linear-gradient(0deg, rgba(0,0,0,.6) 0 1px, transparent 1px 3px);
   }
 
-  .wrap{max-width:1520px;margin:0 auto}
+  .wrap{max-width:1620px;margin:0 auto}
 
   /* ============ 头部 ============ */
   .hud{
@@ -89,11 +89,11 @@
   .tableWrap::-webkit-scrollbar-thumb{background:#2a333c}
   .tableWrap::-webkit-scrollbar-thumb:hover{background:var(--yellow)}
 
-  .tableInner{min-width:1370px}
+  .tableInner{min-width:1460px}
 
   .grid{
     display:grid;align-items:center;column-gap:14px;
-    grid-template-columns:30px minmax(230px,2fr) 126px 112px 112px 126px 120px 218px 84px;
+    grid-template-columns:30px minmax(180px,1.6fr) minmax(110px,1fr) 126px 112px 112px 126px 120px 218px 84px;
   }
 
   /* ============ 表头 ============ */
@@ -105,11 +105,11 @@
     text-transform:uppercase;
   }
   .thead > div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .thead > div:nth-child(4),
   .thead > div:nth-child(5),
   .thead > div:nth-child(6),
   .thead > div:nth-child(7),
-  .thead > div:nth-child(8){text-align:right}
+  .thead > div:nth-child(8),
+  .thead > div:nth-child(9){text-align:right}
 
   /* ============ 数据行 ============ */
   .trow{
@@ -191,6 +191,18 @@
 
   .name-cell select.inp{flex:1 1 auto;min-width:0;cursor:pointer}
 
+  /* 账号列：纯文本输入 */
+  .inp.account{
+    font-weight:400;
+    letter-spacing:.02em;
+    color:#c3ccd4;
+  }
+  .trow:not(.is-editing) .inp.account:empty::before,
+  .trow:not(.is-editing) .inp.account[value=""]::before{
+    content:'—';
+    color:#4a545e;
+  }
+
   /* 输入控件 */
   .inp{
     width:100%;font:inherit;font-size:15.5px;
@@ -215,12 +227,6 @@
   .inp.num::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 
   /* ===== 所有下拉框：彻底隐藏文本插入符 ===== */
-  /*
-    做法：把文字颜色设为透明，让插入符无色；
-    再用 text-shadow 把文字颜色「画」回来，视觉完全不变。
-    这样比单纯 caret-color: transparent 更可靠，
-    Chromium / Firefox 都不再出现闪烁光标。
-  */
   select.inp{
     appearance:none;-webkit-appearance:none;cursor:pointer;
     padding-right:26px;
@@ -237,7 +243,6 @@
     background-repeat:no-repeat;
   }
   select.inp option{background:#12161a;color:var(--txt)}
-  /* 禁用态：元素不可聚焦，恢复常规文本渲染 */
   select.inp:disabled{
     color:var(--txt);
     text-shadow:none;
@@ -390,6 +395,7 @@
         <div class="grid thead">
           <div></div>
           <div>产物名称</div>
+          <div>账号</div>
           <div>地区</div>
           <div>生产 /分</div>
           <div>消耗 /分</div>
@@ -409,7 +415,7 @@
     <span class="hint">数据自动保存在本机浏览器 · 上限：四号谷地 80,000 / 武陵 90,000</span>
   </div>
 
-  <div class="foot">TALOS-II // ENDFIELD INDUSTRY SYSTEM // v1.0.5</div>
+  <div class="foot">TALOS-II // ENDFIELD INDUSTRY SYSTEM // v1.0.6</div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -466,6 +472,7 @@
     r.cons  = round2(Math.max(0, r.cons));
     r.stock = Math.max(0, Math.floor(r.stock));
     r.editing = !!r.editing;
+    if (typeof r.account !== 'string') r.account = '';
     // 名称归一化：不在配置里的名称，一律回退到第一个物品
     if (typeof r.name !== 'string' || ITEMS.indexOf(r.name) < 0) {
       r.name = ITEMS[0];
@@ -489,9 +496,9 @@
     const t = Date.now();
     const pick = function (i) { return ITEMS[i] || ITEMS[0]; };
     return [
-      { id: uid(), name: pick(0), region: 'wuling', prod: 24, cons: 6,  stock: 52000, ts: t, editing: false },
-      { id: uid(), name: pick(1), region: 'wuling', prod: 15, cons: 15, stock: 30000, ts: t, editing: false },
-      { id: uid(), name: pick(2), region: 'gudi',   prod: 8,  cons: 20, stock: 40000, ts: t, editing: false }
+      { id: uid(), name: pick(0), account: '主账号', region: 'wuling', prod: 24, cons: 6,  stock: 52000, ts: t, editing: false },
+      { id: uid(), name: pick(1), account: '主账号', region: 'wuling', prod: 15, cons: 15, stock: 30000, ts: t, editing: false },
+      { id: uid(), name: pick(2), account: '小号',   region: 'gudi',   prod: 8,  cons: 20, stock: 40000, ts: t, editing: false }
     ];
   }
 
@@ -505,6 +512,7 @@
         return {
           id: r && r.id ? String(r.id) : uid(),
           name: r && typeof r.name === 'string' ? r.name : ITEMS[0],
+          account: r && typeof r.account === 'string' ? r.account : '',
           region: r && LIMITS[r.region] ? r.region : 'wuling',
           prod: round2(num(r && r.prod)),
           cons: round2(num(r && r.cons)),
@@ -633,6 +641,7 @@
         '<div class="item-icon" data-icon></div>' +
         '<select class="inp sel" data-k="name">' + nameOpts + '</select>' +
       '</div>' +
+      '<div class="cell"><input class="inp account" data-k="account" maxlength="32" placeholder="账号" value="' + escAttr(row.account) + '"></div>' +
       '<div class="cell"><select class="inp sel" data-k="region">' +
         '<option value="wuling">武陵</option>' +
         '<option value="gudi">四号谷地</option>' +
@@ -686,6 +695,13 @@
       const k = e.target.dataset.k;
       if (!k) return;
       if (e.target.tagName === 'SELECT') return;   // select 交给 change 处理
+
+      // 账号：纯文本，直接更新即可，不涉及存量时间锚点
+      if (k === 'account') {
+        row.account = e.target.value;
+        save();
+        return;
+      }
 
       // 改动数字前，先冻结「此刻真实存量」为新基准（已受上限钳制）
       const frozen = Math.max(0, Math.floor(currentStock(row)));
@@ -894,6 +910,7 @@
         const inp = el.querySelector('[data-k="' + k + '"]');
         if (inp) inp.value = String(v);
       };
+      set('account', row.account);
       set('prod', row.prod);
       set('cons', row.cons);
       set('stock', row.stock);
@@ -989,6 +1006,7 @@
     const row = {
       id: uid(),
       name: ITEMS[0],
+      account: '',
       region: 'wuling',
       prod: 0, cons: 0, stock: 0,
       ts: Date.now(), editing: true
