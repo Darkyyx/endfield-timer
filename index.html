@@ -141,12 +141,14 @@
 
   .cell{min-width:0}
 
-  /* 拖拽手柄 */
+  /* 拖拽手柄：圆角矩形 */
   .handle{
-    height:36px;display:grid;place-items:center;
+    width:30px;height:30px;margin:0 auto;
+    display:grid;place-items:center;
     color:#4a545e;font-size:17px;line-height:1;
     cursor:grab;user-select:none;-webkit-user-select:none;
     border:1px solid transparent;
+    border-radius:8px;
     transition:.15s ease;
   }
   .handle:hover{color:var(--yellow);border-color:var(--line);background:rgba(255,210,30,.08)}
@@ -165,6 +167,9 @@
     background-position:center;
     background-repeat:no-repeat;
     position:relative;
+    cursor:default;
+    user-select:none;
+    -webkit-user-select:none;
     transition:border-color .15s ease, background-color .15s ease;
   }
   .name-cell:hover .item-icon{border-color:rgba(255,210,30,.35)}
@@ -228,6 +233,11 @@
   .trow:not(.is-editing) select.inp{
     background-image:none;
     padding-right:8px;
+  }
+  /* 查看态整行不出现文本光标 */
+  .trow:not(.is-editing),
+  .trow:not(.is-editing) .name-cell{
+    cursor:default;
   }
 
   /* 剩余容量 + 进度条 */
