@@ -1027,16 +1027,14 @@
   }
 
   function paintStats() {
-    let full = 0, soon = 0, drain = 0;
+    let soon = 0, drain = 0;
     rows.forEach(function (r) {
       const c = compute(r);
-      if (c.state === 'full') full++;
-      else if (c.state === 'filling' && c.seconds < 3600) soon++;
+      if (c.state === 'filling' && c.seconds < 3600) soon++;
       if (c.state === 'draining' && c.seconds < 3600) drain++;
     });
     statsEl.innerHTML =
       '<span>产物 <b>' + rows.length + '</b></span>' +
-      '<span class="hot">已爆仓 <b>' + full + '</b></span>' +
       '<span class="soon">1h 内爆仓 <b>' + soon + '</b></span>' +
       '<span class="drain">1h 内耗尽 <b>' + drain + '</b></span>';
   }
