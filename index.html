@@ -70,6 +70,7 @@
   .stats b{color:var(--txt);font-weight:600}
   .stats .hot b{color:var(--red)}
   .stats .soon b{color:var(--yellow)}
+  .stats .drain b{color:var(--cyan)}
 
   /* ============ 面板 ============ */
   .panel{
@@ -168,7 +169,7 @@
     background-position:center;
     background-repeat:no-repeat;
     position:relative;
-    pointer-events:none;        /* 关键：点击/悬停穿透，不触发任何焦点 */
+    pointer-events:none;
     user-select:none;
     -webkit-user-select:none;
     transition:border-color .15s ease, background-color .15s ease;
@@ -208,7 +209,7 @@
   .trow.is-editing .name-cell .view-text,
   .trow.is-editing .region-cell .view-text{display:none}
 
-  /* 账号列：纯文本输入 */
+  /* 备注列：纯文本输入 */
   .inp.account{
     font-weight:400;
     letter-spacing:.02em;
@@ -287,7 +288,7 @@
     transition:width .35s ease, background .35s ease;
   }
 
-  /* 倒计时 */
+  /* ============ 倒计时 ============ */
   .cd{text-align:right;padding-right:2px}
   .cd-time{
     font-family:var(--mono);font-size:22px;font-weight:600;
@@ -306,10 +307,21 @@
     overflow:hidden;text-overflow:ellipsis;
     font-variant-numeric:tabular-nums;
   }
+
+  /* 生产 > 消耗：黄色，爆仓倒计时 */
   .st-filling .cd-time{color:var(--yellow);text-shadow:0 0 16px rgba(255,210,30,.32)}
   .st-filling .cd-eta{color:#5c6570}
+
+  /* 消耗 > 生产：青色，耗尽倒计时 */
+  .st-draining .cd-time{color:var(--cyan);text-shadow:0 0 16px rgba(79,208,224,.32)}
+  .st-draining .cd-eta{color:#4d6a72}
+
+  /* 已封顶：红色警示 */
   .st-full .cd-time{color:var(--red);text-shadow:0 0 16px rgba(255,90,82,.3)}
-  .st-idle .cd-time,.st-draining .cd-time{color:#4e5862}
+
+  /* 已耗尽 / 产销平衡：静默灰 */
+  .st-empty .cd-time,
+  .st-idle .cd-time{color:#4e5862}
 
   @keyframes urgent{
     0%,100%{opacity:1}
@@ -415,7 +427,7 @@
     <span class="hint">数据自动保存在本机浏览器 · 上限：四号谷地 80,000 / 武陵 90,000</span>
   </div>
 
-  <div class="foot">TALOS-II // ENDFIELD INDUSTRY SYSTEM // v1.0.6</div>
+  <div class="foot">TALOS-II // ENDFIELD INDUSTRY SYSTEM // v1.1.0</div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -560,16 +572,27 @@
     let state = 'idle';
     let seconds = null;
 
-    if (remain <= 0) {
-      state = 'full';
-    } else if (net > 0) {
-      state = 'filling';
-      seconds = remain / net * 60;
-    } else if (net === 0) {
-      state = 'idle';
+    if (net > 0) {
+      // 生产 > 消耗：计算爆仓倒计时
+      if (remain <= 0) {
+        state = 'full';
+      } else {
+        state = 'filling';
+        seconds = remain / net * 60;
+      }
+    } else if (net < 0) {
+      // 消耗 > 生产：计算耗尽倒计时
+      if (stock <= 0) {
+        state = 'empty';
+      } else {
+        state = 'draining';
+        seconds = stock / Math.abs(net) * 60;
+      }
     } else {
-      state = 'draining';
+      // 产销平衡
+      state = 'idle';
     }
+
     return { cap, stock, prod, cons, net, remain, state, seconds };
   }
 
@@ -894,18 +917,15 @@
       btn.classList.toggle('on', on);
     }
 
-    // input：查看态只读但可选中复制；编辑态可改
     el.querySelectorAll('input.inp').forEach(function (inp) {
       inp.readOnly = !on;
       inp.tabIndex = on ? 0 : -1;
     });
 
-    // select：仅编辑态可用
     el.querySelectorAll('select.inp').forEach(function (s) {
       s.disabled = !on;
     });
 
-    // 纯文本视图同步
     const nameView = el.querySelector('[data-k="name-view"]');
     if (nameView) nameView.textContent = row.name;
     const regionView = el.querySelector('[data-k="region-view"]');
@@ -958,9 +978,11 @@
     barI.style.width = (ratio * 100).toFixed(1) + '%';
     barI.style.background = ratio >= 0.9
       ? 'linear-gradient(90deg,#7a1d18,#ff5a52)'
-      : 'linear-gradient(90deg,#6b5400,#ffd21e)';
+      : (c.state === 'draining' || c.state === 'empty')
+        ? 'linear-gradient(90deg,#0d4b52,#4fd0e0)'
+        : 'linear-gradient(90deg,#6b5400,#ffd21e)';
 
-    el.classList.remove('st-filling', 'st-full', 'st-idle', 'st-draining');
+    el.classList.remove('st-filling', 'st-full', 'st-idle', 'st-draining', 'st-empty');
     cdTime.classList.remove('urgent');
 
     if (c.state === 'full') {
@@ -974,30 +996,38 @@
       cdSub.textContent = '净 +' + fmtRate(c.net) + ' /分';
       cdEta.textContent = '封顶 ' + fmtEta(new Date(Date.now() + c.seconds * 1000));
       if (c.seconds < 1800) cdTime.classList.add('urgent');
-    } else if (c.state === 'idle') {
+    } else if (c.state === 'draining') {
+      el.classList.add('st-draining');
+      cdTime.textContent = fmtDur(c.seconds);
+      cdSub.textContent = '净 ' + fmtRate(c.net) + ' /分';
+      cdEta.textContent = '耗尽 ' + fmtEta(new Date(Date.now() + c.seconds * 1000));
+      if (c.seconds < 1800) cdTime.classList.add('urgent');
+    } else if (c.state === 'empty') {
+      el.classList.add('st-empty');
+      cdTime.textContent = '已耗尽';
+      cdSub.textContent = '当前存量为 0';
+      cdEta.textContent = '';
+    } else {
       el.classList.add('st-idle');
       cdTime.textContent = '——';
       cdSub.textContent = '产销平衡';
-      cdEta.textContent = '';
-    } else {
-      el.classList.add('st-draining');
-      cdTime.textContent = '——';
-      cdSub.textContent = '净 ' + fmtRate(c.net) + ' /分 · 不封顶';
       cdEta.textContent = '';
     }
   }
 
   function paintStats() {
-    let full = 0, soon = 0;
+    let full = 0, soon = 0, drain = 0;
     rows.forEach(function (r) {
       const c = compute(r);
       if (c.state === 'full') full++;
       else if (c.state === 'filling' && c.seconds < 3600) soon++;
+      if (c.state === 'draining' && c.seconds < 3600) drain++;
     });
     statsEl.innerHTML =
       '<span>产物 <b>' + rows.length + '</b></span>' +
       '<span class="hot">已封顶 <b>' + full + '</b></span>' +
-      '<span class="soon">1h 内封顶 <b>' + soon + '</b></span>';
+      '<span class="soon">1h 内封顶 <b>' + soon + '</b></span>' +
+      '<span class="drain">1h 内耗尽 <b>' + drain + '</b></span>';
   }
 
   /* ================= 每秒刷新 ================= */
