@@ -319,7 +319,7 @@
     <span class="hint">数据自动保存在本机浏览器 · 上限：四号谷地 80,000 / 武陵 90,000</span>
   </div>
 
-  <div class="foot">TALOS-II // ENDFIELD INDUSTRY SYSTEM // v1.0.2</div>
+  <div class="foot">TALOS-II // ENDFIELD INDUSTRY SYSTEM // v1.0.3</div>
 </div>
 
 <script>
@@ -398,14 +398,16 @@
   }
 
   /* ================= 核心：按时间锚点推算当前存量 ================= */
+  /* 修复：加上限钳制，达到地区上限后不再继续增长 */
   function currentStock(row) {
+    const cap  = LIMITS[row.region] || LIMITS.gudi;
     const prod = Math.max(0, num(row.prod));
     const cons = Math.max(0, num(row.cons));
     const net  = prod - cons;
     const base = Math.max(0, num(row.stock));
     const ts   = (typeof row.ts === 'number' && row.ts > 0) ? row.ts : Date.now();
     const elapsed = Math.max(0, (Date.now() - ts) / 1000);
-    return Math.max(0, base + net * elapsed / 60);
+    return clamp(base + net * elapsed / 60, 0, cap);
   }
 
   /* ================= 计算 ================= */
@@ -533,11 +535,10 @@
         return;
       }
 
-      // 除名称外，任何改动都先冻结「此刻真实存量」为新基准
+      // 除名称外，任何改动都先冻结「此刻真实存量」为新基准（已受上限钳制）
       const frozen = Math.max(0, Math.floor(currentStock(row)));
 
       if (k === 'stock') {
-        // 存量：只允许整数
         const raw = e.target.value;
         let iv = 0;
         if (raw !== '') {
@@ -558,7 +559,6 @@
       }
       row.ts = Date.now();
 
-      // 同步存量显示（若用户当前没在编辑存量）
       if (document.activeElement !== stockInput) {
         stockInput.value = String(row.stock);
       }
@@ -618,12 +618,10 @@
 
   function toggleEditing(el, row) {
     if (row.editing) {
-      // 完成：以此刻真实存量作为新基准
       row.stock = Math.max(0, Math.floor(currentStock(row)));
       row.ts = Date.now();
       row.editing = false;
     } else {
-      // 进入编辑：冻结当前值，填入输入框
       row.stock = Math.max(0, Math.floor(currentStock(row)));
       row.ts = Date.now();
       row.editing = true;
