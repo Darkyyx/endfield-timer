@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0c0e">
+<title>终末地 · 产线封顶倒计时</title>
+<style>
+  :root{
+    --bg:#080a0c;
+    --panel:rgba(14,18,22,.86);
+    --line:#242c34;
+    --txt:#d9e0e6;
+    --dim:#6c7783;
+    --yellow:#ffd21e;
+    --cyan:#4fd0e0;
+    --red:#ff5a52;
+    --mono:ui-monospace,"SF Mono","Cascadia Mono",Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{color-scheme:dark}
+  body{
+    min-height:100vh;
+    background:var(--bg);
+    color:var(--txt);
+    font-family:"Barlow","Noto Sans SC",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    padding:26px 18px 70px;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  /* 背景网格 + 光晕 */
+  body::before{
+    content:'';position:fixed;inset:0;z-index:-2;pointer-events:none;
+    background:
+      radial-gradient(1100px 520px at 50% -12%, rgba(255,210,30,.07), transparent 68%),
+      radial-gradient(900px 500px at 100% 110%, rgba(79,208,224,.05), transparent 70%),
+      linear-gradient(rgba(130,150,170,.045) 1px, transparent 1px) 0 0/100% 46px,
+      linear-gradient(90deg, rgba(130,150,170,.045) 1px, transparent 1px) 0 0/46px 100%;
+  }
+  /* 扫描线 */
+  body::after{
+    content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.22;
+    background:repeating-linear-gradient(0deg, rgba(0,0,0,.6) 0 1px, transparent 1px 3px);
+  }
+
+  .wrap{max-width:1260px;margin:0 auto}
+
+  /* ============ 头部 ============ */
+  .hud{
+    display:flex;align-items:flex-end;justify-content:space-between;
+    gap:18px;flex-wrap:wrap;
+    padding-bottom:14px;margin-bottom:20px;
+    border-bottom:1px solid var(--line);position:relative;
+  }
+  .hud::after{
+    content:'';position:absolute;left:0;bottom:-1px;width:132px;height:2px;
+    background:linear-gradient(90deg,var(--yellow),rgba(255,210,30,0));
+  }
+  .logo{
+    font-family:var(--mono);font-size:10.5px;font-weight:700;
+    letter-spacing:.44em;color:var(--yellow);opacity:.9;
+  }
+  h1{
+    font-size:23px;font-weight:600;letter-spacing:.1em;margin-top:7px;line-height:1.2;
+  }
+  h1 span{color:var(--dim);font-weight:400;font-size:14px;letter-spacing:.14em;margin-left:10px}
+  .stats{
+    font-family:var(--mono);font-size:12px;color:var(--dim);
+    letter-spacing:.04em;display:flex;gap:18px;flex-wrap:wrap;
+  }
+  .stats b{color:var(--txt);font-weight:600}
+  .stats .hot b{color:var(--red)}
+  .stats .soon b{color:var(--yellow)}
+
+  /* ============ 面板 ============ */
+  .panel{
+    position:relative;background:var(--panel);
+    border:1px solid var(--line);
+    backdrop-filter:blur(2px);
+  }
+  .panel::before,.panel::after{
+    content:'';position:absolute;height:2px;width:78px;background:var(--yellow);
+  }
+  .panel::before{top:-1px;left:-1px}
+  .panel::after{bottom:-1px;right:-1px;opacity:.45}
+
+  .tableWrap{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
+  .tableWrap::-webkit-scrollbar{height:8px}
+  .tableWrap::-webkit-scrollbar-track{background:#0b0e12}
+  .tableWrap::-webkit-scrollbar-thumb{background:#2a333c}
+  .tableWrap::-webkit-scrollbar-thumb:hover{background:var(--yellow)}
+
+  .tableInner{min-width:930px}
+
+  .grid{
+    display:grid;align-items:center;column-gap:12px;
+    grid-template-columns:minmax(140px,1.7fr) 110px 92px 92px 104px 96px 178px 32px;
+  }
+
+  /* ============ 表头 ============ */
+  .thead{
+    height:42px;padding:0 16px;
+    font-size:10.5px;letter-spacing:.16em;color:var(--dim);
+    border-bottom:1px solid var(--line);
+    background:rgba(255,255,255,.018);
+    text-transform:uppercase;
+  }
+  .thead > div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .thead > div:nth-child(3),
+  .thead > div:nth-child(4),
+  .thead > div:nth-child(5),
+  .thead > div:nth-child(6){text-align:right}
+  .thead > div:nth-child(7){text-align:right}
+
+  /* ============ 数据行 ============ */
+  .trow{
+    padding:0 16px;min-height:58px;
+    border-bottom:1px solid rgba(255,255,255,.045);
+    transition:background .15s ease, box-shadow .15s ease;
+  }
+  .trow:last-child{border-bottom:none}
+  .trow:hover{
+    background:rgba(255,210,30,.035);
+    box-shadow:inset 2px 0 0 rgba(255,210,30,.75);
+  }
+
+  .cell{min-width:0}
+
+  /* 输入控件 */
+  .inp{
+    width:100%;font:inherit;font-size:13px;
+    color:var(--txt);background:transparent;
+    border:1px solid transparent;
+    border-bottom:1px solid rgba(255,255,255,.11);
+    padding:6px 6px;outline:none;border-radius:0;
+    transition:border-color .15s, background .15s, color .15s;
+  }
+  .inp::placeholder{color:#414b55}
+  .inp:hover{border-bottom-color:rgba(255,210,30,.4)}
+  .inp:focus{
+    border-bottom-color:var(--yellow);
+    background:rgba(255,210,30,.07);
+  }
+  .inp.num{
+    font-family:var(--mono);text-align:right;
+    font-variant-numeric:tabular-nums;letter-spacing:.01em;
+    -moz-appearance:textfield;appearance:textfield;
+  }
+  .inp.num::-webkit-outer-spin-button,
+  .inp.num::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  .inp.name{font-weight:500;letter-spacing:.03em}
+
+  select.inp{
+    appearance:none;-webkit-appearance:none;cursor:pointer;
+    padding-right:22px;
+    background-image:
+      linear-gradient(45deg,transparent 50%,var(--dim) 50%),
+      linear-gradient(135deg,var(--dim) 50%,transparent 50%);
+    background-position:calc(100% - 12px) 52%, calc(100% - 7px) 52%;
+    background-size:5px 5px,5px 5px;
+    background-repeat:no-repeat;
+  }
+  select.inp option{background:#12161a;color:var(--txt)}
+
+  /* 剩余容量 + 进度条 */
+  .remain-val{
+    font-family:var(--mono);font-size:13px;text-align:right;
+    font-variant-numeric:tabular-nums;color:#b6bfc7;
+  }
+  .bar{
+    height:3px;margin-top:6px;background:rgba(255,255,255,.075);
+    position:relative;overflow:hidden;
+  }
+  .bar i{
+    position:absolute;left:0;top:0;bottom:0;width:0;
+    background:linear-gradient(90deg,#6b5400,var(--yellow));
+    transition:width .35s ease, background .35s ease;
+  }
+
+  /* 倒计时 */
+  .cd{text-align:right;padding-right:2px}
+  .cd-time{
+    font-family:var(--mono);font-size:17px;font-weight:600;
+    letter-spacing:.02em;line-height:1.15;
+    font-variant-numeric:tabular-nums;
+    color:var(--dim);
+  }
+  .cd-sub{
+    font-family:var(--mono);font-size:10.5px;color:#4d5762;
+    letter-spacing:.03em;margin-top:3px;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;
+  }
+  .st-filling .cd-time{color:var(--yellow);text-shadow:0 0 14px rgba(255,210,30,.32)}
+  .st-full .cd-time{color:var(--red);text-shadow:0 0 14px rgba(255,90,82,.3)}
+  .st-idle .cd-time,.st-draining .cd-time{color:#4e5862}
+
+  @keyframes urgent{
+    0%,100%{opacity:1}
+    50%{opacity:.28}
+  }
+  .cd-time.urgent{animation:urgent 1s steps(1,end) infinite}
+
+  /* 删除按钮 */
+  .del{
+    width:26px;height:26px;display:grid;place-items:center;
+    background:transparent;border:1px solid var(--line);
+    color:#5b656f;font-size:12px;line-height:1;cursor:pointer;
+    transition:.15s ease;
+  }
+  .del:hover{border-color:var(--red);color:var(--red);background:rgba(255,90,82,.1)}
+
+  /* 空状态 */
+  .empty{
+    padding:54px 20px;text-align:center;
+    color:var(--dim);font-size:12.5px;letter-spacing:.18em;
+  }
+
+  /* ============ 工具栏 ============ */
+  .toolbar{
+    display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+    margin-top:18px;
+  }
+  .btn{
+    font:inherit;font-size:12.5px;letter-spacing:.12em;
+    padding:10px 20px;cursor:pointer;
+    color:var(--yellow);background:transparent;
+    border:1px solid rgba(255,210,30,.42);
+    transition:.15s ease;position:relative;
+  }
+  .btn:hover{background:rgba(255,210,30,.13);border-color:var(--yellow)}
+  .btn:active{transform:translateY(1px)}
+  .btn.ghost{color:var(--dim);border-color:var(--line)}
+  .btn.ghost:hover{color:var(--red);border-color:rgba(255,90,82,.55);background:rgba(255,90,82,.08)}
+
+  .hint{
+    font-family:var(--mono);font-size:11px;color:#4b545d;letter-spacing:.05em;
+  }
+
+  .foot{
+    margin-top:34px;text-align:center;
+    font-family:var(--mono);font-size:10.5px;
+    letter-spacing:.28em;color:#31383f;
+  }
+
+  @media (max-width:640px){
+    body{padding:18px 12px 56px}
+    h1{font-size:18px}
+    h1 span{display:block;margin:6px 0 0;font-size:12px}
+    .stats{font-size:11px;gap:12px}
+    .btn{padding:9px 15px;font-size:12px}
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="hud">
+    <div class="brand">
+      <div class="logo">ENDFIELD</div>
+      <h1>产线封顶倒计时<span>PRODUCTION LINE MONITOR</span></h1>
+    </div>
+    <div class="stats" id="stats"></div>
+  </header>
+
+  <div class="panel">
+    <div class="tableWrap">
+      <div class="tableInner">
+        <div class="grid thead">
+          <div>产物名称</div>
+          <div>地区</div>
+          <div>生产 /分</div>
+          <div>消耗 /分</div>
+          <div>当前存量</div>
+          <div>剩余容量</div>
+          <div>封顶倒计时</div>
+          <div></div>
+        </div>
+        <div id="rows"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <button class="btn" id="addBtn">＋ 添加产物</button>
+    <button class="btn ghost" id="clearBtn">清空全部</button>
+    <span class="hint">数据自动保存在本机浏览器 · 上限：四号谷地 80,000 / 武陵 90,000</span>
+  </div>
+
+  <div class="foot">TALOS-II // ENDFIELD INDUSTRY SYSTEM</div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ================= 配置 ================= */
+  const STORE_KEY = 'endfield_line_timer_v1';
+  const LIMITS = { gudi: 80000, wuling: 90000 };
+
+  const rowsEl   = document.getElementById('rows');
+  const statsEl  = document.getElementById('stats');
+  const addBtn   = document.getElementById('addBtn');
+  const clearBtn = document.getElementById('clearBtn');
+
+  /* ================= 数据 ================= */
+  let rows = load() || seed();
+
+  function uid() {
+    return 'r' + Math.random().toString(36).slice(2, 10);
+  }
+  function num(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+
+  function seed() {
+    return [
+      { id: uid(), name: '源石碎片', region: 'gudi',   prod: 24, cons: 6,  stock: 52000 },
+      { id: uid(), name: '碳素结晶', region: 'wuling', prod: 15, cons: 15, stock: 30000 },
+      { id: uid(), name: '精密零件', region: 'gudi',   prod: 8,  cons: 20, stock: 40000 }
+    ];
+  }
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (!Array.isArray(data)) return null;
+      return data.map(function (r) {
+        return {
+          id: r && r.id ? String(r.id) : uid(),
+          name: r && typeof r.name === 'string' ? r.name : '',
+          region: r && LIMITS[r.region] ? r.region : 'gudi',
+          prod: num(r && r.prod),
+          cons: num(r && r.cons),
+          stock: num(r && r.stock)
+        };
+      });
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify(rows));
+    } catch (e) { /* 忽略隐私模式等异常 */ }
+  }
+
+  /* ================= 计算 ================= */
+  function compute(row) {
+    const cap   = LIMITS[row.region] || LIMITS.gudi;
+    const stock = Math.max(0, num(row.stock));
+    const prod  = Math.max(0, num(row.prod));
+    const cons  = Math.max(0, num(row.cons));
+    const net   = prod - cons;
+    const raw   = cap - stock;
+    const remain = Math.max(0, raw);
+
+    let state = 'idle';
+    let seconds = null;
+
+    if (raw <= 0) {
+      state = 'full';
+    } else if (net > 0) {
+      state = 'filling';
+      seconds = remain / net * 60;   // 速率单位为「/分钟」→ 秒
+    } else if (net === 0) {
+      state = 'idle';
+    } else {
+      state = 'draining';
+    }
+    return { cap, stock, prod, cons, net, remain, state, seconds };
+  }
+
+  /* ================= 格式化 ================= */
+  function fmtNum(n) {
+    if (!Number.isFinite(n)) return '—';
+    return Math.round(n).toLocaleString('en-US');
+  }
+  function fmtRate(n) {
+    const r = Math.round(n * 100) / 100;
+    return Number.isInteger(r) ? String(r) : String(r).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+  }
+  function fmtDur(sec) {
+    sec = Math.max(0, Math.floor(sec));
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    const p = function (n) { return String(n).padStart(2, '0'); };
+    return d > 0
+      ? d + '天 ' + p(h) + ':' + p(m) + ':' + p(s)
+      : p(h) + ':' + p(m) + ':' + p(s);
+  }
+  function escAttr(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  /* ================= 渲染 ================= */
+  function render() {
+    rowsEl.innerHTML = '';
+
+    if (rows.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = '暂无产物 · 点击下方按钮添加';
+      rowsEl.appendChild(empty);
+      paintStats();
+      return;
+    }
+
+    rows.forEach(function (row) {
+      rowsEl.appendChild(buildRow(row));
+    });
+    tick();
+  }
+
+  function buildRow(row) {
+    const el = document.createElement('div');
+    el.className = 'grid trow';
+    el.dataset.id = row.id;
+
+    el.innerHTML =
+      '<div class="cell"><input class="inp name" data-k="name" maxlength="24" placeholder="产物名称" value="' + escAttr(row.name) + '"></div>' +
+      '<div class="cell"><select class="inp sel" data-k="region">' +
+        '<option value="gudi">四号谷地</option>' +
+        '<option value="wuling">武陵</option>' +
+      '</select></div>' +
+      '<div class="cell"><input class="inp num" type="number" min="0" step="any" data-k="prod" value="' + row.prod + '"></div>' +
+      '<div class="cell"><input class="inp num" type="number" min="0" step="any" data-k="cons" value="' + row.cons + '"></div>' +
+      '<div class="cell"><input class="inp num" type="number" min="0" step="any" data-k="stock" value="' + row.stock + '"></div>' +
+      '<div class="cell remain">' +
+        '<div class="remain-val">—</div>' +
+        '<div class="bar"><i></i></div>' +
+      '</div>' +
+      '<div class="cell cd">' +
+        '<div class="cd-time">--:--:--</div>' +
+        '<div class="cd-sub"></div>' +
+      '</div>' +
+      '<div class="cell"><button class="del" type="button" title="删除该产物">✕</button></div>';
+
+    el.querySelector('.sel').value = row.region;
+
+    el.addEventListener('input', function (e) {
+      const k = e.target.dataset.k;
+      if (!k) return;
+      if (k === 'name') {
+        row.name = e.target.value;
+      } else if (k === 'region') {
+        row.region = e.target.value;
+      } else {
+        row[k] = e.target.value === '' ? 0 : num(e.target.value);
+      }
+      save();
+      paint(el, row);
+      paintStats();
+    });
+
+    el.querySelector('.del').addEventListener('click', function () {
+      rows = rows.filter(function (r) { return r.id !== row.id; });
+      save();
+      render();
+    });
+
+    return el;
+  }
+
+  /* ================= 局部刷新 ================= */
+  function paint(el, row) {
+    const c = compute(row);
+
+    const remainVal = el.querySelector('.remain-val');
+    const barI      = el.querySelector('.bar i');
+    const cdTime    = el.querySelector('.cd-time');
+    const cdSub     = el.querySelector('.cd-sub');
+
+    remainVal.textContent = fmtNum(c.remain);
+
+    const ratio = clamp(c.stock / c.cap, 0, 1);
+    barI.style.width = (ratio * 100).toFixed(1) + '%';
+    barI.style.background = ratio >= 0.9
+      ? 'linear-gradient(90deg,#7a1d18,#ff5a52)'
+      : 'linear-gradient(90deg,#6b5400,#ffd21e)';
+
+    el.classList.remove('st-filling', 'st-full', 'st-idle', 'st-draining');
+    cdTime.classList.remove('urgent');
+
+    if (c.state === 'full') {
+      el.classList.add('st-full');
+      cdTime.textContent = '已封顶';
+      cdSub.textContent = '上限 ' + fmtNum(c.cap);
+    } else if (c.state === 'filling') {
+      el.classList.add('st-filling');
+      cdTime.textContent = fmtDur(c.seconds);
+      cdSub.textContent = '净 +' + fmtRate(c.net) + ' /分';
+      if (c.seconds < 1800) cdTime.classList.add('urgent');
+    } else if (c.state === 'idle') {
+      el.classList.add('st-idle');
+      cdTime.textContent = '——';
+      cdSub.textContent = '产销平衡';
+    } else {
+      el.classList.add('st-draining');
+      cdTime.textContent = '——';
+      cdSub.textContent = '净 ' + fmtRate(c.net) + ' /分 · 不封顶';
+    }
+  }
+
+  function paintStats() {
+    let full = 0, soon = 0;
+    rows.forEach(function (r) {
+      const c = compute(r);
+      if (c.state === 'full') full++;
+      else if (c.state === 'filling' && c.seconds < 3600) soon++;
+    });
+    statsEl.innerHTML =
+      '<span>产物 <b>' + rows.length + '</b></span>' +
+      '<span class="hot">已封顶 <b>' + full + '</b></span>' +
+      '<span class="soon">1h 内封顶 <b>' + soon + '</b></span>';
+  }
+
+  /* ================= 每秒刷新 ================= */
+  function tick() {
+    rows.forEach(function (row) {
+      const el = rowsEl.querySelector('[data-id="' + row.id + '"]');
+      if (el) paint(el, row);
+    });
+    paintStats();
+  }
+
+  /* ================= 事件 ================= */
+  addBtn.addEventListener('click', function () {
+    rows.push({ id: uid(), name: '', region: 'gudi', prod: 0, cons: 0, stock: 0 });
+    save();
+    render();
+    const last = rowsEl.lastElementChild;
+    if (last) {
+      const nameInput = last.querySelector('.name');
+      if (nameInput) nameInput.focus();
+    }
+  });
+
+  clearBtn.addEventListener('click', function () {
+    if (rows.length === 0) return;
+    if (!confirm('确定要清空全部产物数据吗？此操作不可撤销。')) return;
+    rows = [];
+    save();
+    render();
+  });
+
+  /* ================= 启动 ================= */
+  render();
+  setInterval(tick, 1000);
+})();
+</script>
+</body>
+</html>
