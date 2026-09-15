@@ -492,7 +492,7 @@
       : date.getFullYear() + '-';
     return prefix
       + p(date.getMonth() + 1) + '-' + p(date.getDate()) + ' '
-      + p(date.getHours()) + ':' + p(date.getMinutes()) + ':' + p(date.getSeconds());
+      + p(date.getHours()) + ':' + p(date.getMinutes());
   }
   function escAttr(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
