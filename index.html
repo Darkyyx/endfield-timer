@@ -204,13 +204,17 @@
   .trow:not(.is-editing) .inp.name{color:#e8eef3}
 
   /* 剩余容量 + 进度条 */
+  /* 进度条绝对定位，不占单元格高度，数字与其他列垂直居中对齐 */
+  .cell.remain{position:relative}
   .remain-val{
     font-family:var(--mono);font-size:15.5px;text-align:right;
     font-variant-numeric:tabular-nums;color:#b6bfc7;
   }
   .bar{
-    height:4px;margin-top:8px;background:rgba(255,255,255,.075);
-    position:relative;overflow:hidden;
+    position:absolute;left:0;right:0;
+    top:calc(100% + 7px);
+    height:4px;background:rgba(255,255,255,.075);
+    overflow:hidden;pointer-events:none;
   }
   .bar i{
     position:absolute;left:0;top:0;bottom:0;width:0;
