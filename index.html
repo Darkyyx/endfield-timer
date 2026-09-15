@@ -89,11 +89,11 @@
   .tableWrap::-webkit-scrollbar-thumb{background:#2a333c}
   .tableWrap::-webkit-scrollbar-thumb:hover{background:var(--yellow)}
 
-  .tableInner{min-width:1240px}
+  .tableInner{min-width:1290px}
 
   .grid{
     display:grid;align-items:center;column-gap:14px;
-    grid-template-columns:minmax(170px,1.7fr) 126px 112px 112px 126px 120px 218px 84px;
+    grid-template-columns:30px minmax(170px,1.7fr) 126px 112px 112px 126px 120px 218px 84px;
   }
 
   /* ============ 表头 ============ */
@@ -105,17 +105,18 @@
     text-transform:uppercase;
   }
   .thead > div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .thead > div:nth-child(3),
   .thead > div:nth-child(4),
   .thead > div:nth-child(5),
-  .thead > div:nth-child(6){text-align:right}
-  .thead > div:nth-child(7){text-align:right}
+  .thead > div:nth-child(6),
+  .thead > div:nth-child(7),
+  .thead > div:nth-child(8){text-align:right}
 
   /* ============ 数据行 ============ */
   .trow{
     padding:0 22px;min-height:84px;
+    position:relative;
     border-bottom:1px solid rgba(255,255,255,.045);
-    transition:background .15s ease, box-shadow .15s ease;
+    transition:background .15s ease, box-shadow .15s ease, opacity .15s ease;
   }
   .trow:last-child{border-bottom:none}
   .trow:hover{
@@ -127,7 +128,29 @@
     box-shadow:inset 2px 0 0 var(--yellow);
   }
 
+  /* 拖拽中 / 放置指示线 */
+  .trow.dragging{opacity:.3}
+  .trow.drop-before::before,
+  .trow.drop-after::after{
+    content:'';position:absolute;left:0;right:0;height:3px;
+    background:var(--yellow);z-index:6;pointer-events:none;
+    box-shadow:0 0 12px rgba(255,210,30,.6);
+  }
+  .trow.drop-before::before{top:-1px}
+  .trow.drop-after::after{bottom:-1px}
+
   .cell{min-width:0}
+
+  /* 拖拽手柄 */
+  .handle{
+    height:36px;display:grid;place-items:center;
+    color:#4a545e;font-size:17px;line-height:1;
+    cursor:grab;user-select:none;-webkit-user-select:none;
+    border:1px solid transparent;
+    transition:.15s ease;
+  }
+  .handle:hover{color:var(--yellow);border-color:var(--line);background:rgba(255,210,30,.08)}
+  .handle:active{cursor:grabbing;color:var(--yellow)}
 
   /* 输入控件 */
   .inp{
@@ -300,6 +323,7 @@
     <div class="tableWrap">
       <div class="tableInner">
         <div class="grid thead">
+          <div></div>
           <div>产物名称</div>
           <div>地区</div>
           <div>生产 /分</div>
@@ -399,7 +423,7 @@
   }
 
   /* ================= 核心：按时间锚点推算当前存量 ================= */
-  /* 修复：加上限钳制，达到地区上限后不再继续增长 */
+  /* 存量被钳制在 [0, 地区上限]，封顶后不再增长 */
   function currentStock(row) {
     const cap  = LIMITS[row.region] || LIMITS.gudi;
     const prod = Math.max(0, num(row.prod));
@@ -497,10 +521,11 @@
     el.dataset.id = row.id;
 
     el.innerHTML =
+      '<div class="cell"><div class="handle" draggable="true" title="按住拖动排序">⠿</div></div>' +
       '<div class="cell"><input class="inp name" data-k="name" maxlength="24" placeholder="产物名称" value="' + escAttr(row.name) + '"></div>' +
       '<div class="cell"><select class="inp sel" data-k="region">' +
-        '<option value="gudi">四号谷地</option>' +
         '<option value="wuling">武陵</option>' +
+        '<option value="gudi">四号谷地</option>' +
       '</select></div>' +
       '<div class="cell"><input class="inp num" type="number" min="0" step="0.01" data-k="prod" value="' + row.prod + '"></div>' +
       '<div class="cell"><input class="inp num" type="number" min="0" step="0.01" data-k="cons" value="' + row.cons + '"></div>' +
@@ -524,6 +549,22 @@
     const stockInput = el.querySelector('[data-k="stock"]');
     const prodInput  = el.querySelector('[data-k="prod"]');
     const consInput  = el.querySelector('[data-k="cons"]');
+
+    /* -------- 拖拽排序 -------- */
+    const handle = el.querySelector('.handle');
+
+    handle.addEventListener('dragstart', function (e) {
+      dragId = row.id;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', row.id);
+      el.classList.add('dragging');
+    });
+
+    handle.addEventListener('dragend', function () {
+      dragId = null;
+      el.classList.remove('dragging');
+      clearDropMarks();
+    });
 
     /* -------- 输入处理（仅编辑态生效） -------- */
     el.addEventListener('input', function (e) {
@@ -596,6 +637,82 @@
     applyEditing(el, row);
     return el;
   }
+
+  /* ================= 拖拽排序 ================= */
+  let dragId = null;
+
+  function clearDropMarks() {
+    Array.prototype.forEach.call(
+      rowsEl.querySelectorAll('.drop-before, .drop-after'),
+      function (n) { n.classList.remove('drop-before', 'drop-after'); }
+    );
+  }
+
+  // 返回「应插入到其前面的行」；null 表示插到末尾
+  function getRowAfter(y) {
+    const list = Array.prototype.slice.call(
+      rowsEl.querySelectorAll('.trow:not(.dragging)')
+    );
+    let closest = null;
+    let closestOffset = -Infinity;
+
+    list.forEach(function (child) {
+      const box = child.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;   // <0 表示鼠标在行中心上方
+      if (offset < 0 && offset > closestOffset) {
+        closestOffset = offset;
+        closest = child;
+      }
+    });
+    return closest;
+  }
+
+  rowsEl.addEventListener('dragover', function (e) {
+    if (!dragId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+
+    clearDropMarks();
+    const after = getRowAfter(e.clientY);
+
+    if (after) {
+      after.classList.add('drop-before');
+    } else {
+      const list = Array.prototype.slice.call(
+        rowsEl.querySelectorAll('.trow:not(.dragging)')
+      );
+      if (list.length) list[list.length - 1].classList.add('drop-after');
+    }
+  });
+
+  rowsEl.addEventListener('dragleave', function (e) {
+    if (!dragId) return;
+    if (!rowsEl.contains(e.relatedTarget)) clearDropMarks();
+  });
+
+  rowsEl.addEventListener('drop', function (e) {
+    if (!dragId) return;
+    e.preventDefault();
+
+    const after = getRowAfter(e.clientY);
+    const fromIdx = rows.findIndex(function (r) { return r.id === dragId; });
+    if (fromIdx < 0) { clearDropMarks(); return; }
+
+    const moved = rows.splice(fromIdx, 1)[0];
+    let toIdx;
+    if (after) {
+      toIdx = rows.findIndex(function (r) { return r.id === after.dataset.id; });
+      if (toIdx < 0) toIdx = rows.length;
+    } else {
+      toIdx = rows.length;
+    }
+    rows.splice(toIdx, 0, moved);
+
+    dragId = null;
+    clearDropMarks();
+    save();
+    render();
+  });
 
   /* ================= 编辑态切换 ================= */
   function applyEditing(el, row) {
@@ -709,7 +826,6 @@
       const el = rowsEl.querySelector('[data-id="' + row.id + '"]');
       if (!el) return;
 
-      // 存量输入框：查看态始终跟随实时值；编辑态下未聚焦时也跟随
       const stockInput = el.querySelector('[data-k="stock"]');
       if (stockInput && document.activeElement !== stockInput) {
         const live = Math.max(0, Math.floor(currentStock(row)));
