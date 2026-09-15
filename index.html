@@ -24,78 +24,81 @@
     background:var(--bg);
     color:var(--txt);
     font-family:"Barlow","Noto Sans SC",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-    padding:26px 18px 70px;
+    padding:34px 26px 90px;
     -webkit-font-smoothing:antialiased;
     overflow-x:hidden;
   }
   body::before{
     content:'';position:fixed;inset:0;z-index:-2;pointer-events:none;
     background:
-      radial-gradient(1100px 520px at 50% -12%, rgba(255,210,30,.07), transparent 68%),
-      radial-gradient(900px 500px at 100% 110%, rgba(79,208,224,.05), transparent 70%),
-      linear-gradient(rgba(130,150,170,.045) 1px, transparent 1px) 0 0/100% 46px,
-      linear-gradient(90deg, rgba(130,150,170,.045) 1px, transparent 1px) 0 0/46px 100%;
+      radial-gradient(1200px 580px at 50% -12%, rgba(255,210,30,.075), transparent 68%),
+      radial-gradient(1000px 560px at 100% 110%, rgba(79,208,224,.055), transparent 70%),
+      linear-gradient(rgba(130,150,170,.045) 1px, transparent 1px) 0 0/100% 52px,
+      linear-gradient(90deg, rgba(130,150,170,.045) 1px, transparent 1px) 0 0/52px 100%;
   }
   body::after{
     content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.22;
     background:repeating-linear-gradient(0deg, rgba(0,0,0,.6) 0 1px, transparent 1px 3px);
   }
 
-  .wrap{max-width:1260px;margin:0 auto}
+  .wrap{max-width:1440px;margin:0 auto}
 
+  /* ============ 头部 ============ */
   .hud{
     display:flex;align-items:flex-end;justify-content:space-between;
-    gap:18px;flex-wrap:wrap;
-    padding-bottom:14px;margin-bottom:20px;
+    gap:22px;flex-wrap:wrap;
+    padding-bottom:18px;margin-bottom:26px;
     border-bottom:1px solid var(--line);position:relative;
   }
   .hud::after{
-    content:'';position:absolute;left:0;bottom:-1px;width:132px;height:2px;
+    content:'';position:absolute;left:0;bottom:-1px;width:156px;height:2px;
     background:linear-gradient(90deg,var(--yellow),rgba(255,210,30,0));
   }
   .logo{
-    font-family:var(--mono);font-size:10.5px;font-weight:700;
-    letter-spacing:.44em;color:var(--yellow);opacity:.9;
+    font-family:var(--mono);font-size:12px;font-weight:700;
+    letter-spacing:.46em;color:var(--yellow);opacity:.9;
   }
   h1{
-    font-size:23px;font-weight:600;letter-spacing:.1em;margin-top:7px;line-height:1.2;
+    font-size:29px;font-weight:600;letter-spacing:.1em;margin-top:9px;line-height:1.2;
   }
-  h1 span{color:var(--dim);font-weight:400;font-size:14px;letter-spacing:.14em;margin-left:10px}
+  h1 span{color:var(--dim);font-weight:400;font-size:15px;letter-spacing:.15em;margin-left:12px}
   .stats{
-    font-family:var(--mono);font-size:12px;color:var(--dim);
-    letter-spacing:.04em;display:flex;gap:18px;flex-wrap:wrap;
+    font-family:var(--mono);font-size:14px;color:var(--dim);
+    letter-spacing:.04em;display:flex;gap:24px;flex-wrap:wrap;
   }
   .stats b{color:var(--txt);font-weight:600}
   .stats .hot b{color:var(--red)}
   .stats .soon b{color:var(--yellow)}
 
+  /* ============ 面板 ============ */
   .panel{
     position:relative;background:var(--panel);
     border:1px solid var(--line);
     backdrop-filter:blur(2px);
   }
   .panel::before,.panel::after{
-    content:'';position:absolute;height:2px;width:78px;background:var(--yellow);
+    content:'';position:absolute;height:2px;width:92px;background:var(--yellow);
   }
   .panel::before{top:-1px;left:-1px}
   .panel::after{bottom:-1px;right:-1px;opacity:.45}
 
   .tableWrap{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
-  .tableWrap::-webkit-scrollbar{height:8px}
+  .tableWrap::-webkit-scrollbar{height:10px}
   .tableWrap::-webkit-scrollbar-track{background:#0b0e12}
   .tableWrap::-webkit-scrollbar-thumb{background:#2a333c}
   .tableWrap::-webkit-scrollbar-thumb:hover{background:var(--yellow)}
 
-  .tableInner{min-width:930px}
+  .tableInner{min-width:1160px}
 
   .grid{
-    display:grid;align-items:center;column-gap:12px;
-    grid-template-columns:minmax(140px,1.7fr) 110px 92px 92px 104px 96px 178px 32px;
+    display:grid;align-items:center;column-gap:14px;
+    grid-template-columns:minmax(170px,1.7fr) 126px 112px 112px 126px 120px 210px 38px;
   }
 
+  /* ============ 表头 ============ */
   .thead{
-    height:42px;padding:0 16px;
-    font-size:10.5px;letter-spacing:.16em;color:var(--dim);
+    height:54px;padding:0 22px;
+    font-size:12px;letter-spacing:.17em;color:var(--dim);
     border-bottom:1px solid var(--line);
     background:rgba(255,255,255,.018);
     text-transform:uppercase;
@@ -107,8 +110,9 @@
   .thead > div:nth-child(6){text-align:right}
   .thead > div:nth-child(7){text-align:right}
 
+  /* ============ 数据行 ============ */
   .trow{
-    padding:0 16px;min-height:58px;
+    padding:0 22px;min-height:76px;
     border-bottom:1px solid rgba(255,255,255,.045);
     transition:background .15s ease, box-shadow .15s ease;
   }
@@ -120,12 +124,13 @@
 
   .cell{min-width:0}
 
+  /* 输入控件 */
   .inp{
-    width:100%;font:inherit;font-size:13px;
+    width:100%;font:inherit;font-size:15.5px;
     color:var(--txt);background:transparent;
     border:1px solid transparent;
     border-bottom:1px solid rgba(255,255,255,.11);
-    padding:6px 6px;outline:none;border-radius:0;
+    padding:8px 8px;outline:none;border-radius:0;
     transition:border-color .15s, background .15s, color .15s;
   }
   .inp::placeholder{color:#414b55}
@@ -145,22 +150,23 @@
 
   select.inp{
     appearance:none;-webkit-appearance:none;cursor:pointer;
-    padding-right:22px;
+    padding-right:26px;
     background-image:
       linear-gradient(45deg,transparent 50%,var(--dim) 50%),
       linear-gradient(135deg,var(--dim) 50%,transparent 50%);
-    background-position:calc(100% - 12px) 52%, calc(100% - 7px) 52%;
-    background-size:5px 5px,5px 5px;
+    background-position:calc(100% - 14px) 54%, calc(100% - 8px) 54%;
+    background-size:6px 6px,6px 6px;
     background-repeat:no-repeat;
   }
   select.inp option{background:#12161a;color:var(--txt)}
 
+  /* 剩余容量 + 进度条 */
   .remain-val{
-    font-family:var(--mono);font-size:13px;text-align:right;
+    font-family:var(--mono);font-size:15.5px;text-align:right;
     font-variant-numeric:tabular-nums;color:#b6bfc7;
   }
   .bar{
-    height:3px;margin-top:6px;background:rgba(255,255,255,.075);
+    height:4px;margin-top:8px;background:rgba(255,255,255,.075);
     position:relative;overflow:hidden;
   }
   .bar i{
@@ -169,20 +175,21 @@
     transition:width .35s ease, background .35s ease;
   }
 
+  /* 倒计时 */
   .cd{text-align:right;padding-right:2px}
   .cd-time{
-    font-family:var(--mono);font-size:17px;font-weight:600;
+    font-family:var(--mono);font-size:22px;font-weight:600;
     letter-spacing:.02em;line-height:1.15;
     font-variant-numeric:tabular-nums;
     color:var(--dim);
   }
   .cd-sub{
-    font-family:var(--mono);font-size:10.5px;color:#4d5762;
-    letter-spacing:.03em;margin-top:3px;white-space:nowrap;
+    font-family:var(--mono);font-size:12px;color:#4d5762;
+    letter-spacing:.03em;margin-top:4px;white-space:nowrap;
     overflow:hidden;text-overflow:ellipsis;
   }
-  .st-filling .cd-time{color:var(--yellow);text-shadow:0 0 14px rgba(255,210,30,.32)}
-  .st-full .cd-time{color:var(--red);text-shadow:0 0 14px rgba(255,90,82,.3)}
+  .st-filling .cd-time{color:var(--yellow);text-shadow:0 0 16px rgba(255,210,30,.32)}
+  .st-full .cd-time{color:var(--red);text-shadow:0 0 16px rgba(255,90,82,.3)}
   .st-idle .cd-time,.st-draining .cd-time{color:#4e5862}
 
   @keyframes urgent{
@@ -191,26 +198,29 @@
   }
   .cd-time.urgent{animation:urgent 1s steps(1,end) infinite}
 
+  /* 删除按钮 */
   .del{
-    width:26px;height:26px;display:grid;place-items:center;
+    width:32px;height:32px;display:grid;place-items:center;
     background:transparent;border:1px solid var(--line);
-    color:#5b656f;font-size:12px;line-height:1;cursor:pointer;
+    color:#5b656f;font-size:14px;line-height:1;cursor:pointer;
     transition:.15s ease;
   }
   .del:hover{border-color:var(--red);color:var(--red);background:rgba(255,90,82,.1)}
 
+  /* 空状态 */
   .empty{
-    padding:54px 20px;text-align:center;
-    color:var(--dim);font-size:12.5px;letter-spacing:.18em;
+    padding:70px 20px;text-align:center;
+    color:var(--dim);font-size:14px;letter-spacing:.18em;
   }
 
+  /* ============ 工具栏 ============ */
   .toolbar{
-    display:flex;align-items:center;gap:18px;flex-wrap:wrap;
-    margin-top:18px;
+    display:flex;align-items:center;gap:22px;flex-wrap:wrap;
+    margin-top:24px;
   }
   .btn{
-    font:inherit;font-size:12.5px;letter-spacing:.12em;
-    padding:10px 20px;cursor:pointer;
+    font:inherit;font-size:14.5px;letter-spacing:.12em;
+    padding:13px 28px;cursor:pointer;
     color:var(--yellow);background:transparent;
     border:1px solid rgba(255,210,30,.42);
     transition:.15s ease;position:relative;
@@ -221,21 +231,26 @@
   .btn.ghost:hover{color:var(--red);border-color:rgba(255,90,82,.55);background:rgba(255,90,82,.08)}
 
   .hint{
-    font-family:var(--mono);font-size:11px;color:#4b545d;letter-spacing:.05em;
+    font-family:var(--mono);font-size:12.5px;color:#4b545d;letter-spacing:.05em;
   }
 
   .foot{
-    margin-top:34px;text-align:center;
-    font-family:var(--mono);font-size:10.5px;
-    letter-spacing:.28em;color:#31383f;
+    margin-top:44px;text-align:center;
+    font-family:var(--mono);font-size:12px;
+    letter-spacing:.3em;color:#31383f;
   }
 
   @media (max-width:640px){
-    body{padding:18px 12px 56px}
-    h1{font-size:18px}
-    h1 span{display:block;margin:6px 0 0;font-size:12px}
-    .stats{font-size:11px;gap:12px}
-    .btn{padding:9px 15px;font-size:12px}
+    body{padding:20px 12px 64px}
+    h1{font-size:21px}
+    h1 span{display:block;margin:7px 0 0;font-size:13px}
+    .stats{font-size:12.5px;gap:14px}
+    .thead{height:48px;font-size:11px}
+    .trow{min-height:72px}
+    .inp{font-size:14.5px}
+    .cd-time{font-size:19px}
+    .btn{padding:11px 18px;font-size:13.5px}
+    .hint{font-size:11.5px}
   }
 </style>
 </head>
@@ -297,6 +312,9 @@
   // 保证每一行都有时间锚点
   rows.forEach(function (r) {
     if (typeof r.ts !== 'number' || !isFinite(r.ts) || r.ts <= 0) r.ts = Date.now();
+    r.prod  = round2(Math.max(0, r.prod));
+    r.cons  = round2(Math.max(0, r.cons));
+    r.stock = Math.max(0, Math.floor(r.stock));
   });
 
   function uid() {
@@ -305,6 +323,11 @@
   function num(v) {
     const n = Number(v);
     return Number.isFinite(n) ? n : 0;
+  }
+  // 四舍五入到 2 位小数
+  function round2(v) {
+    if (!Number.isFinite(v)) return 0;
+    return Math.round((v + Number.EPSILON) * 100) / 100;
   }
   function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
 
@@ -328,9 +351,9 @@
           id: r && r.id ? String(r.id) : uid(),
           name: r && typeof r.name === 'string' ? r.name : '',
           region: r && LIMITS[r.region] ? r.region : 'gudi',
-          prod: num(r && r.prod),
-          cons: num(r && r.cons),
-          stock: num(r && r.stock),
+          prod: round2(num(r && r.prod)),
+          cons: round2(num(r && r.cons)),
+          stock: Math.max(0, Math.floor(num(r && r.stock))),
           ts: (r && typeof r.ts === 'number' && r.ts > 0) ? r.ts : Date.now()
         };
       });
@@ -361,7 +384,7 @@
     const cap  = LIMITS[row.region] || LIMITS.gudi;
     const prod = Math.max(0, num(row.prod));
     const cons = Math.max(0, num(row.cons));
-    const net  = prod - cons;
+    const net  = round2(prod - cons);
 
     const stock  = currentStock(row);
     const remain = Math.max(0, cap - stock);
@@ -388,8 +411,8 @@
     return Math.round(n).toLocaleString('en-US');
   }
   function fmtRate(n) {
-    const r = Math.round(n * 100) / 100;
-    return Number.isInteger(r) ? String(r) : String(r).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+    const r = round2(n);
+    return String(r);
   }
   function fmtDur(sec) {
     sec = Math.max(0, Math.floor(sec));
@@ -438,9 +461,9 @@
         '<option value="gudi">四号谷地</option>' +
         '<option value="wuling">武陵</option>' +
       '</select></div>' +
-      '<div class="cell"><input class="inp num" type="number" min="0" step="any" data-k="prod" value="' + row.prod + '"></div>' +
-      '<div class="cell"><input class="inp num" type="number" min="0" step="any" data-k="cons" value="' + row.cons + '"></div>' +
-      '<div class="cell"><input class="inp num" type="number" min="0" step="any" data-k="stock" value="' + row.stock + '"></div>' +
+      '<div class="cell"><input class="inp num" type="number" min="0" step="0.01" data-k="prod" value="' + row.prod + '"></div>' +
+      '<div class="cell"><input class="inp num" type="number" min="0" step="0.01" data-k="cons" value="' + row.cons + '"></div>' +
+      '<div class="cell"><input class="inp num" type="number" min="0" step="1" data-k="stock" value="' + row.stock + '"></div>' +
       '<div class="cell remain">' +
         '<div class="remain-val">—</div>' +
         '<div class="bar"><i></i></div>' +
@@ -453,32 +476,52 @@
 
     el.querySelector('.sel').value = row.region;
 
+    const stockInput = el.querySelector('[data-k="stock"]');
+    const prodInput  = el.querySelector('[data-k="prod"]');
+    const consInput  = el.querySelector('[data-k="cons"]');
+
+    /* -------- 输入处理 -------- */
     el.addEventListener('input', function (e) {
       const k = e.target.dataset.k;
       if (!k) return;
 
+      // 名称：直接更新
       if (k === 'name') {
         row.name = e.target.value;
-      } else {
-        // 关键：任何数值/地区变更前，先把时间推进到「现在」，
-        // 并把此刻的真实存量固化为新的基准值，避免历史时间丢失。
-        const frozen = currentStock(row);
-        row.ts = Date.now();
-        row.stock = Math.round(frozen * 100) / 100;
+        save();
+        return;
+      }
 
-        if (k === 'region') {
-          row.region = e.target.value;
-        } else if (k === 'stock') {
-          row.stock = e.target.value === '' ? 0 : num(e.target.value);
+      // 其余字段变更前，先把时间推进到「现在」，
+      // 并把此刻真实存量固化为新基准，避免历史时间丢失
+      const frozen = Math.max(0, Math.floor(currentStock(row)));
+      row.ts = Date.now();
+      row.stock = frozen;
+
+      if (k === 'region') {
+        row.region = e.target.value;
+      } else if (k === 'stock') {
+        // 存量：只允许整数，实时过滤
+        const raw = e.target.value;
+        if (raw === '') {
+          row.stock = 0;
         } else {
-          row[k] = e.target.value === '' ? 0 : num(e.target.value);
+          const n = parseFloat(raw);
+          const iv = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+          row.stock = iv;
+          if (String(iv) !== raw) e.target.value = String(iv);
         }
+      } else if (k === 'prod' || k === 'cons') {
+        // 速度：允许 2 位小数，超出先截断到 2 位（输入框内不打断，
+        // 数据层已按四舍五入存值，失焦时再回写显示）
+        const raw = e.target.value;
+        const n = raw === '' ? 0 : num(raw);
+        row[k] = round2(Math.max(0, n));
+      }
 
-        // 编辑其它字段时，同步刷新存量输入框的显示值
-        if (k !== 'stock') {
-          const stockInput = el.querySelector('[data-k="stock"]');
-          if (stockInput) stockInput.value = row.stock;
-        }
+      // 编辑非存量字段时，同步刷新存量输入框显示
+      if (k !== 'stock' && stockInput) {
+        stockInput.value = String(row.stock);
       }
 
       save();
@@ -486,6 +529,20 @@
       paintStats();
     });
 
+    /* -------- 失焦：格式化显示 -------- */
+    function onBlur(e) {
+      const k = e.target.dataset.k;
+      if (k === 'prod' || k === 'cons') {
+        e.target.value = String(row[k]);          // 1.2 → "1.2"，1.239 → "1.24"
+      } else if (k === 'stock') {
+        e.target.value = String(row.stock);
+      }
+    }
+    prodInput.addEventListener('blur', onBlur);
+    consInput.addEventListener('blur', onBlur);
+    stockInput.addEventListener('blur', onBlur);
+
+    /* -------- 删除 -------- */
     el.querySelector('.del').addEventListener('click', function () {
       rows = rows.filter(function (r) { return r.id !== row.id; });
       save();
@@ -581,7 +638,7 @@
   render();
   setInterval(tick, 1000);
 
-  // 页面从后台切回时立即刷新一次，避免节流导致的跳秒
+  // 从后台切回时立即刷新，避免节流造成的跳秒
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden) tick();
   });
