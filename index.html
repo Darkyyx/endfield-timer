@@ -88,11 +88,11 @@
   .tableWrap::-webkit-scrollbar-thumb{background:#2a333c}
   .tableWrap::-webkit-scrollbar-thumb:hover{background:var(--yellow)}
 
-  .tableInner{min-width:1160px}
+  .tableInner{min-width:1240px}
 
   .grid{
     display:grid;align-items:center;column-gap:14px;
-    grid-template-columns:minmax(170px,1.7fr) 126px 112px 112px 126px 120px 210px 38px;
+    grid-template-columns:minmax(170px,1.7fr) 126px 112px 112px 126px 120px 218px 84px;
   }
 
   /* ============ 表头 ============ */
@@ -112,7 +112,7 @@
 
   /* ============ 数据行 ============ */
   .trow{
-    padding:0 22px;min-height:76px;
+    padding:0 22px;min-height:84px;
     border-bottom:1px solid rgba(255,255,255,.045);
     transition:background .15s ease, box-shadow .15s ease;
   }
@@ -120,6 +120,10 @@
   .trow:hover{
     background:rgba(255,210,30,.035);
     box-shadow:inset 2px 0 0 rgba(255,210,30,.75);
+  }
+  .trow.is-editing{
+    background:rgba(255,210,30,.05);
+    box-shadow:inset 2px 0 0 var(--yellow);
   }
 
   .cell{min-width:0}
@@ -159,6 +163,21 @@
     background-repeat:no-repeat;
   }
   select.inp option{background:#12161a;color:var(--txt)}
+  select.inp:disabled{color:var(--txt);opacity:1;-webkit-text-fill-color:var(--txt)}
+
+  /* ===== 查看态：把输入控件伪装成纯文本 ===== */
+  .trow:not(.is-editing) .inp{
+    border-bottom-color:transparent;
+    pointer-events:none;
+    cursor:default;
+    background:transparent;
+  }
+  .trow:not(.is-editing) .inp:hover{border-bottom-color:transparent}
+  .trow:not(.is-editing) select.inp{
+    background-image:none;
+    padding-right:8px;
+  }
+  .trow:not(.is-editing) .inp.name{color:#e8eef3}
 
   /* 剩余容量 + 进度条 */
   .remain-val{
@@ -188,7 +207,14 @@
     letter-spacing:.03em;margin-top:4px;white-space:nowrap;
     overflow:hidden;text-overflow:ellipsis;
   }
+  .cd-eta{
+    font-family:var(--mono);font-size:11.5px;color:#3f4850;
+    letter-spacing:.02em;margin-top:3px;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;
+    font-variant-numeric:tabular-nums;
+  }
   .st-filling .cd-time{color:var(--yellow);text-shadow:0 0 16px rgba(255,210,30,.32)}
+  .st-filling .cd-eta{color:#5c6570}
   .st-full .cd-time{color:var(--red);text-shadow:0 0 16px rgba(255,90,82,.3)}
   .st-idle .cd-time,.st-draining .cd-time{color:#4e5862}
 
@@ -198,14 +224,17 @@
   }
   .cd-time.urgent{animation:urgent 1s steps(1,end) infinite}
 
-  /* 删除按钮 */
-  .del{
+  /* 操作按钮 */
+  .act{display:flex;gap:6px;justify-content:flex-end}
+  .ico{
     width:32px;height:32px;display:grid;place-items:center;
     background:transparent;border:1px solid var(--line);
-    color:#5b656f;font-size:14px;line-height:1;cursor:pointer;
-    transition:.15s ease;
+    color:#5b656f;font-size:13px;line-height:1;cursor:pointer;
+    transition:.15s ease;flex:0 0 auto;
   }
-  .del:hover{border-color:var(--red);color:var(--red);background:rgba(255,90,82,.1)}
+  .ico:hover{border-color:var(--yellow);color:var(--yellow);background:rgba(255,210,30,.1)}
+  .ico.del:hover{border-color:var(--red);color:var(--red);background:rgba(255,90,82,.1)}
+  .ico.on{border-color:var(--yellow);color:var(--yellow);background:rgba(255,210,30,.15)}
 
   /* 空状态 */
   .empty{
@@ -246,7 +275,7 @@
     h1 span{display:block;margin:7px 0 0;font-size:13px}
     .stats{font-size:12.5px;gap:14px}
     .thead{height:48px;font-size:11px}
-    .trow{min-height:72px}
+    .trow{min-height:80px}
     .inp{font-size:14.5px}
     .cd-time{font-size:19px}
     .btn{padding:11px 18px;font-size:13.5px}
@@ -290,7 +319,7 @@
     <span class="hint">数据自动保存在本机浏览器 · 上限：四号谷地 80,000 / 武陵 90,000</span>
   </div>
 
-  <div class="foot">TALOS-II // ENDFIELD INDUSTRY SYSTEM // v1.0.1</div>
+  <div class="foot">TALOS-II // ENDFIELD INDUSTRY SYSTEM // v1.0.2</div>
 </div>
 
 <script>
@@ -309,12 +338,12 @@
   /* ================= 数据 ================= */
   let rows = load() || seed();
 
-  // 保证每一行都有时间锚点
   rows.forEach(function (r) {
     if (typeof r.ts !== 'number' || !isFinite(r.ts) || r.ts <= 0) r.ts = Date.now();
     r.prod  = round2(Math.max(0, r.prod));
     r.cons  = round2(Math.max(0, r.cons));
     r.stock = Math.max(0, Math.floor(r.stock));
+    r.editing = !!r.editing;
   });
 
   function uid() {
@@ -324,7 +353,6 @@
     const n = Number(v);
     return Number.isFinite(n) ? n : 0;
   }
-  // 四舍五入到 2 位小数
   function round2(v) {
     if (!Number.isFinite(v)) return 0;
     return Math.round((v + Number.EPSILON) * 100) / 100;
@@ -334,9 +362,9 @@
   function seed() {
     const t = Date.now();
     return [
-      { id: uid(), name: '源石碎片', region: 'gudi',   prod: 24, cons: 6,  stock: 52000, ts: t },
-      { id: uid(), name: '碳素结晶', region: 'wuling', prod: 15, cons: 15, stock: 30000, ts: t },
-      { id: uid(), name: '精密零件', region: 'gudi',   prod: 8,  cons: 20, stock: 40000, ts: t }
+      { id: uid(), name: '源石碎片', region: 'gudi',   prod: 24, cons: 6,  stock: 52000, ts: t, editing: false },
+      { id: uid(), name: '碳素结晶', region: 'wuling', prod: 15, cons: 15, stock: 30000, ts: t, editing: false },
+      { id: uid(), name: '精密零件', region: 'gudi',   prod: 8,  cons: 20, stock: 40000, ts: t, editing: false }
     ];
   }
 
@@ -354,7 +382,8 @@
           prod: round2(num(r && r.prod)),
           cons: round2(num(r && r.cons)),
           stock: Math.max(0, Math.floor(num(r && r.stock))),
-          ts: (r && typeof r.ts === 'number' && r.ts > 0) ? r.ts : Date.now()
+          ts: (r && typeof r.ts === 'number' && r.ts > 0) ? r.ts : Date.now(),
+          editing: !!(r && r.editing)
         };
       });
     } catch (e) {
@@ -396,7 +425,7 @@
       state = 'full';
     } else if (net > 0) {
       state = 'filling';
-      seconds = remain / net * 60;   // 速率单位「/分钟」→ 秒
+      seconds = remain / net * 60;
     } else if (net === 0) {
       state = 'idle';
     } else {
@@ -411,8 +440,7 @@
     return Math.round(n).toLocaleString('en-US');
   }
   function fmtRate(n) {
-    const r = round2(n);
-    return String(r);
+    return String(round2(n));
   }
   function fmtDur(sec) {
     sec = Math.max(0, Math.floor(sec));
@@ -424,6 +452,16 @@
     return d > 0
       ? d + '天 ' + p(h) + ':' + p(m) + ':' + p(s)
       : p(h) + ':' + p(m) + ':' + p(s);
+  }
+  function fmtEta(date) {
+    const p = function (n) { return String(n).padStart(2, '0'); };
+    const now = new Date();
+    const prefix = (date.getFullYear() === now.getFullYear())
+      ? ''
+      : date.getFullYear() + '-';
+    return prefix
+      + p(date.getMonth() + 1) + '-' + p(date.getDate()) + ' '
+      + p(date.getHours()) + ':' + p(date.getMinutes()) + ':' + p(date.getSeconds());
   }
   function escAttr(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -471,8 +509,12 @@
       '<div class="cell cd">' +
         '<div class="cd-time">--:--:--</div>' +
         '<div class="cd-sub"></div>' +
+        '<div class="cd-eta"></div>' +
       '</div>' +
-      '<div class="cell"><button class="del" type="button" title="删除该产物">✕</button></div>';
+      '<div class="cell act">' +
+        '<button class="ico edit-btn" type="button" title="修改">✎</button>' +
+        '<button class="ico del" type="button" title="删除">✕</button>' +
+      '</div>';
 
     el.querySelector('.sel').value = row.region;
 
@@ -480,47 +522,44 @@
     const prodInput  = el.querySelector('[data-k="prod"]');
     const consInput  = el.querySelector('[data-k="cons"]');
 
-    /* -------- 输入处理 -------- */
+    /* -------- 输入处理（仅编辑态生效） -------- */
     el.addEventListener('input', function (e) {
       const k = e.target.dataset.k;
       if (!k) return;
 
-      // 名称：直接更新
       if (k === 'name') {
         row.name = e.target.value;
         save();
         return;
       }
 
-      // 其余字段变更前，先把时间推进到「现在」，
-      // 并把此刻真实存量固化为新基准，避免历史时间丢失
+      // 除名称外，任何改动都先冻结「此刻真实存量」为新基准
       const frozen = Math.max(0, Math.floor(currentStock(row)));
-      row.ts = Date.now();
-      row.stock = frozen;
 
-      if (k === 'region') {
-        row.region = e.target.value;
-      } else if (k === 'stock') {
-        // 存量：只允许整数，实时过滤
+      if (k === 'stock') {
+        // 存量：只允许整数
         const raw = e.target.value;
-        if (raw === '') {
-          row.stock = 0;
-        } else {
+        let iv = 0;
+        if (raw !== '') {
           const n = parseFloat(raw);
-          const iv = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
-          row.stock = iv;
-          if (String(iv) !== raw) e.target.value = String(iv);
+          iv = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
         }
-      } else if (k === 'prod' || k === 'cons') {
-        // 速度：允许 2 位小数，超出先截断到 2 位（输入框内不打断，
-        // 数据层已按四舍五入存值，失焦时再回写显示）
-        const raw = e.target.value;
-        const n = raw === '' ? 0 : num(raw);
-        row[k] = round2(Math.max(0, n));
+        row.stock = iv;
+        if (String(iv) !== raw) e.target.value = String(iv);
+      } else {
+        row.stock = frozen;
+        if (k === 'region') {
+          row.region = e.target.value;
+        } else if (k === 'prod' || k === 'cons') {
+          const raw = e.target.value;
+          const n = raw === '' ? 0 : num(raw);
+          row[k] = round2(Math.max(0, n));
+        }
       }
+      row.ts = Date.now();
 
-      // 编辑非存量字段时，同步刷新存量输入框显示
-      if (k !== 'stock' && stockInput) {
+      // 同步存量显示（若用户当前没在编辑存量）
+      if (document.activeElement !== stockInput) {
         stockInput.value = String(row.stock);
       }
 
@@ -533,7 +572,7 @@
     function onBlur(e) {
       const k = e.target.dataset.k;
       if (k === 'prod' || k === 'cons') {
-        e.target.value = String(row[k]);          // 1.2 → "1.2"，1.239 → "1.24"
+        e.target.value = String(row[k]);
       } else if (k === 'stock') {
         e.target.value = String(row.stock);
       }
@@ -542,14 +581,69 @@
     consInput.addEventListener('blur', onBlur);
     stockInput.addEventListener('blur', onBlur);
 
-    /* -------- 删除 -------- */
+    /* -------- 修改 / 删除 -------- */
+    el.querySelector('.edit-btn').addEventListener('click', function () {
+      toggleEditing(el, row);
+    });
+
     el.querySelector('.del').addEventListener('click', function () {
       rows = rows.filter(function (r) { return r.id !== row.id; });
       save();
       render();
     });
 
+    applyEditing(el, row);
     return el;
+  }
+
+  /* ================= 编辑态切换 ================= */
+  function applyEditing(el, row) {
+    const on = !!row.editing;
+    el.classList.toggle('is-editing', on);
+
+    const btn = el.querySelector('.edit-btn');
+    if (btn) {
+      btn.textContent = on ? '✓' : '✎';
+      btn.title = on ? '完成修改' : '修改';
+      btn.classList.toggle('on', on);
+    }
+
+    el.querySelectorAll('.inp').forEach(function (inp) {
+      inp.tabIndex = on ? 0 : -1;
+    });
+
+    const sel = el.querySelector('select.inp');
+    if (sel) sel.disabled = !on;
+  }
+
+  function toggleEditing(el, row) {
+    if (row.editing) {
+      // 完成：以此刻真实存量作为新基准
+      row.stock = Math.max(0, Math.floor(currentStock(row)));
+      row.ts = Date.now();
+      row.editing = false;
+    } else {
+      // 进入编辑：冻结当前值，填入输入框
+      row.stock = Math.max(0, Math.floor(currentStock(row)));
+      row.ts = Date.now();
+      row.editing = true;
+
+      const set = function (k, v) {
+        const inp = el.querySelector('[data-k="' + k + '"]');
+        if (inp) inp.value = String(v);
+      };
+      set('name', row.name);
+      set('prod', row.prod);
+      set('cons', row.cons);
+      set('stock', row.stock);
+      const sel = el.querySelector('.sel');
+      if (sel) sel.value = row.region;
+    }
+
+    applyEditing(el, row);
+    save();
+    paint(el, row);
+    paintStats();
   }
 
   /* ================= 局部刷新 ================= */
@@ -560,6 +654,7 @@
     const barI      = el.querySelector('.bar i');
     const cdTime    = el.querySelector('.cd-time');
     const cdSub     = el.querySelector('.cd-sub');
+    const cdEta     = el.querySelector('.cd-eta');
 
     remainVal.textContent = fmtNum(c.remain);
 
@@ -576,19 +671,23 @@
       el.classList.add('st-full');
       cdTime.textContent = '已封顶';
       cdSub.textContent = '上限 ' + fmtNum(c.cap);
+      cdEta.textContent = '';
     } else if (c.state === 'filling') {
       el.classList.add('st-filling');
       cdTime.textContent = fmtDur(c.seconds);
       cdSub.textContent = '净 +' + fmtRate(c.net) + ' /分';
+      cdEta.textContent = '封顶 ' + fmtEta(new Date(Date.now() + c.seconds * 1000));
       if (c.seconds < 1800) cdTime.classList.add('urgent');
     } else if (c.state === 'idle') {
       el.classList.add('st-idle');
       cdTime.textContent = '——';
       cdSub.textContent = '产销平衡';
+      cdEta.textContent = '';
     } else {
       el.classList.add('st-draining');
       cdTime.textContent = '——';
       cdSub.textContent = '净 ' + fmtRate(c.net) + ' /分 · 不封顶';
+      cdEta.textContent = '';
     }
   }
 
@@ -609,20 +708,35 @@
   function tick() {
     rows.forEach(function (row) {
       const el = rowsEl.querySelector('[data-id="' + row.id + '"]');
-      if (el) paint(el, row);
+      if (!el) return;
+
+      // 存量输入框：查看态始终跟随实时值；编辑态下未聚焦时也跟随
+      const stockInput = el.querySelector('[data-k="stock"]');
+      if (stockInput && document.activeElement !== stockInput) {
+        const live = Math.max(0, Math.floor(currentStock(row)));
+        if (stockInput.value !== String(live)) stockInput.value = String(live);
+      }
+
+      paint(el, row);
     });
     paintStats();
   }
 
   /* ================= 事件 ================= */
   addBtn.addEventListener('click', function () {
-    rows.push({ id: uid(), name: '', region: 'gudi', prod: 0, cons: 0, stock: 0, ts: Date.now() });
+    const row = {
+      id: uid(), name: '', region: 'gudi',
+      prod: 0, cons: 0, stock: 0,
+      ts: Date.now(), editing: true
+    };
+    rows.push(row);
     save();
     render();
-    const last = rowsEl.lastElementChild;
-    if (last) {
-      const nameInput = last.querySelector('.name');
-      if (nameInput) nameInput.focus();
+
+    const el = rowsEl.querySelector('[data-id="' + row.id + '"]');
+    if (el) {
+      const n = el.querySelector('.name');
+      if (n) n.focus();
     }
   });
 
@@ -638,7 +752,6 @@
   render();
   setInterval(tick, 1000);
 
-  // 从后台切回时立即刷新，避免节流造成的跳秒
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden) tick();
   });
