@@ -35,8 +35,8 @@
   body::before{
     content:'';position:fixed;inset:0;z-index:-2;pointer-events:none;
     background:
-      radial-gradient(1200px 580px at 50% -12%, rgba(110,227,122,.055), transparent 68%),
-      radial-gradient(1000px 560px at 100% 110%, rgba(255,90,82,.05), transparent 70%),
+      radial-gradient(1200px 580px at 50% -12%, rgba(255,210,30,.075), transparent 68%),
+      radial-gradient(1000px 560px at 100% 110%, rgba(79,208,224,.055), transparent 70%),
       linear-gradient(rgba(130,150,170,.045) 1px, transparent 1px) 0 0/100% 52px,
       linear-gradient(90deg, rgba(130,150,170,.045) 1px, transparent 1px) 0 0/52px 100%;
   }
@@ -56,11 +56,11 @@
   }
   .hud::after{
     content:'';position:absolute;left:0;bottom:-1px;width:156px;height:2px;
-    background:linear-gradient(90deg,var(--green),rgba(110,227,122,0));
+    background:linear-gradient(90deg,var(--yellow),rgba(255,210,30,0));
   }
   .logo{
     font-family:var(--mono);font-size:12px;font-weight:700;
-    letter-spacing:.46em;color:var(--green);opacity:.9;
+    letter-spacing:.46em;color:var(--yellow);opacity:.9;
   }
   h1{
     font-size:29px;font-weight:600;letter-spacing:.1em;margin-top:9px;line-height:1.2;
@@ -82,7 +82,7 @@
     backdrop-filter:blur(2px);
   }
   .panel::before,.panel::after{
-    content:'';position:absolute;height:2px;width:92px;background:var(--green);
+    content:'';position:absolute;height:2px;width:92px;background:var(--yellow);
   }
   .panel::before{top:-1px;left:-1px}
   .panel::after{bottom:-1px;right:-1px;opacity:.45}
@@ -91,7 +91,7 @@
   .tableWrap::-webkit-scrollbar{height:10px}
   .tableWrap::-webkit-scrollbar-track{background:#0b0e12}
   .tableWrap::-webkit-scrollbar-thumb{background:#2a333c}
-  .tableWrap::-webkit-scrollbar-thumb:hover{background:var(--green)}
+  .tableWrap::-webkit-scrollbar-thumb:hover{background:var(--yellow)}
 
   .tableInner{min-width:1460px}
 
@@ -124,12 +124,12 @@
   }
   .trow:last-child{border-bottom:none}
   .trow:hover{
-    background:rgba(110,227,122,.03);
-    box-shadow:inset 2px 0 0 rgba(110,227,122,.7);
+    background:rgba(255,210,30,.035);
+    box-shadow:inset 2px 0 0 rgba(255,210,30,.75);
   }
   .trow.is-editing{
-    background:rgba(110,227,122,.05);
-    box-shadow:inset 2px 0 0 var(--green);
+    background:rgba(255,210,30,.05);
+    box-shadow:inset 2px 0 0 var(--yellow);
   }
 
   /* 拖拽中 / 放置指示线 */
@@ -137,8 +137,8 @@
   .trow.drop-before::before,
   .trow.drop-after::after{
     content:'';position:absolute;left:0;right:0;height:3px;
-    background:var(--green);z-index:6;pointer-events:none;
-    box-shadow:0 0 12px rgba(110,227,122,.6);
+    background:var(--yellow);z-index:6;pointer-events:none;
+    box-shadow:0 0 12px rgba(255,210,30,.6);
   }
   .trow.drop-before::before{top:-1px}
   .trow.drop-after::after{bottom:-1px}
@@ -155,8 +155,8 @@
     border-radius:8px;
     transition:.15s ease;
   }
-  .handle:hover{color:var(--green);border-color:var(--line);background:rgba(110,227,122,.08)}
-  .handle:active{cursor:grabbing;color:var(--green)}
+  .handle:hover{color:var(--yellow);border-color:var(--line);background:rgba(255,210,30,.08)}
+  .handle:active{cursor:grabbing;color:var(--yellow)}
 
   /* ===== 名称列：图标 + 纯文本 / 下拉框 ===== */
   .name-cell{
@@ -177,7 +177,7 @@
     -webkit-user-select:none;
     transition:border-color .15s ease, background-color .15s ease;
   }
-  .name-cell:hover .item-icon{border-color:rgba(110,227,122,.35)}
+  .name-cell:hover .item-icon{border-color:rgba(255,210,30,.35)}
   .item-icon::after{
     content:'';position:absolute;inset:3px;
     background:
@@ -229,10 +229,10 @@
     transition:border-color .15s, background .15s, color .15s;
   }
   .inp::placeholder{color:#414b55}
-  .inp:hover{border-bottom-color:rgba(110,227,122,.4)}
+  .inp:hover{border-bottom-color:rgba(255,210,30,.4)}
   .inp:focus{
-    border-bottom-color:var(--green);
-    background:rgba(110,227,122,.07);
+    border-bottom-color:var(--yellow);
+    background:rgba(255,210,30,.07);
   }
   .inp.num{
     font-family:var(--mono);text-align:right;
@@ -287,7 +287,7 @@
   }
   .bar i{
     position:absolute;left:0;top:0;bottom:0;width:0;
-    background:linear-gradient(90deg,#2d5c14,var(--green));
+    background:linear-gradient(90deg,#6b5400,var(--yellow));
     transition:width .35s ease, background .35s ease;
   }
 
@@ -342,9 +342,9 @@
     color:#5b656f;font-size:13px;line-height:1;cursor:pointer;
     transition:.15s ease;flex:0 0 auto;
   }
-  .ico:hover{border-color:var(--green);color:var(--green);background:rgba(110,227,122,.1)}
+  .ico:hover{border-color:var(--yellow);color:var(--yellow);background:rgba(255,210,30,.1)}
   .ico.del:hover{border-color:var(--red);color:var(--red);background:rgba(255,90,82,.1)}
-  .ico.on{border-color:var(--green);color:var(--green);background:rgba(110,227,122,.15)}
+  .ico.on{border-color:var(--yellow);color:var(--yellow);background:rgba(255,210,30,.15)}
 
   /* 空状态 */
   .empty{
@@ -360,11 +360,11 @@
   .btn{
     font:inherit;font-size:14.5px;letter-spacing:.12em;
     padding:13px 28px;cursor:pointer;
-    color:var(--green);background:transparent;
-    border:1px solid rgba(110,227,122,.42);
+    color:var(--yellow);background:transparent;
+    border:1px solid rgba(255,210,30,.42);
     transition:.15s ease;position:relative;
   }
-  .btn:hover{background:rgba(110,227,122,.13);border-color:var(--green)}
+  .btn:hover{background:rgba(255,210,30,.13);border-color:var(--yellow)}
   .btn:active{transform:translateY(1px)}
   .btn.ghost{color:var(--dim);border-color:var(--line)}
   .btn.ghost:hover{color:var(--red);border-color:rgba(255,90,82,.55);background:rgba(255,90,82,.08)}
@@ -578,7 +578,6 @@
     let seconds = null;
 
     if (net > 0) {
-      // 生产 > 消耗：计算爆仓倒计时
       if (remain <= 0) {
         state = 'full';
       } else {
@@ -586,7 +585,6 @@
         seconds = remain / net * 60;
       }
     } else if (net < 0) {
-      // 消耗 > 生产：计算耗尽倒计时
       if (stock <= 0) {
         state = 'empty';
       } else {
@@ -991,7 +989,7 @@
     } else if (c.state === 'draining') {
       barGrad = 'linear-gradient(90deg,#7a1d18,#ff5a52)';
     } else {
-      barGrad = 'linear-gradient(90deg,#3a3a3a,#7a7a7a)';
+      barGrad = 'linear-gradient(90deg,#6b5400,#ffd21e)';
     }
     barI.style.background = barGrad;
 
