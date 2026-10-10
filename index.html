@@ -1119,12 +1119,24 @@
     let readOnly = false;     // 用户选了"不导入"，本页面保持只读
     let claiming = false;
 
+    /**
+     * 补全协议。用户常常只填 "xxx.workers.dev" 而漏掉 https://，
+     * 那样浏览器会把它当成相对路径拼到当前页面后面
+     * （ https://你的页面/xxx.workers.dev/test ），得到的是 404/405 而不是 Worker 的响应。
+     */
+    function normalizeUrl(v) {
+      let s = String(v == null ? '' : v).trim();
+      if (!s) return '';
+      if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) s = 'https://' + s;
+      return s.replace(/\/+$/, '');
+    }
+
     function loadCfg() {
       let raw = null;
       try { raw = JSON.parse(localStorage.getItem(CFG_KEY) || 'null'); } catch (e) { raw = null; }
       const c = raw && typeof raw === 'object' ? raw : {};
       return {
-        url: typeof c.url === 'string' ? c.url : '',
+        url: normalizeUrl(c.url),
         token: typeof c.token === 'string' ? c.token : '',
         warn: Number.isFinite(Number(c.warn)) && Number(c.warn) > 0 ? Math.floor(Number(c.warn)) : 30,
         on: !!c.on,
@@ -1172,7 +1184,7 @@
     }
 
     function hostOf(u) {
-      try { return new URL(u).host; } catch (e) { return String(u).replace(/^https?:\/\//, '').split('/')[0]; }
+      try { return new URL(normalizeUrl(u)).host; } catch (e) { return String(u || '').replace(/^https?:\/\//i, '').split('/')[0]; }
     }
 
     function hudHtml() {
@@ -1448,12 +1460,14 @@
     }
 
     function refreshCfg() {
-      cfg.url = String(urlEl.value || '').trim().replace(/\/+$/, '');
+      cfg.url = normalizeUrl(urlEl.value);
       cfg.token = String(tokenEl.value || '').trim();
       const w = parseInt(warnEl.value, 10);
       cfg.warn = (Number.isFinite(w) && w > 0) ? w : 30;
       cfg.on = !!onEl.checked;
       cfg.warnEmpty = !!emptyEl.checked;
+      // 把补全后的地址回填到输入框，让用户看到实际会请求到哪里
+      if (urlEl.value !== cfg.url) urlEl.value = cfg.url;
       persist();
     }
 
