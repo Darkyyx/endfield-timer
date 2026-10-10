@@ -233,20 +233,22 @@ const sandbox = {
   fetch: (url, init) => {
     const u = String(url);
     calls.push({ url: u, body: init && init.body ? JSON.parse(init.body) : null });
+    let payload;
     if (u.endsWith('/snapshot')) {
-      return Promise.resolve({ ok: true, status: 200, json: async () => ({
+      payload = {
         ok: 1,
         rows: [{ id: 'old1', name: '源矿', account: '主账号', region: 'wuling', prod: 15, cons: 2, stock: 89950, ts: 1756000000000 }],
         owner: { host: 'old.example', since: 1 }
-      }) });
+      };
+    } else if (u.endsWith('/claim')) {
+      payload = { ok: 1, mode: 'import', removed: 0, rows: 1 };
+    } else {
+      payload = {
+        ok: 1, rows: 1, removed: 0, foreignRows: 1, owner: { host: 'old.example', mine: false },
+        lastPushAt: 0, lastPushOk: true, lastError: null
+      };
     }
-    if (u.endsWith('/claim')) {
-      return Promise.resolve({ ok: true, status: 200, json: async () => ({ ok: 1, mode: 'import', removed: 0, rows: 1 }) });
-    }
-    return Promise.resolve({ ok: true, status: 200, json: async () => ({
-      ok: 1, rows: 1, removed: 0, foreignRows: 1, owner: { host: 'old.example', mine: false },
-      lastPushAt: 0, lastPushOk: true, lastError: null
-    }) });
+    return Promise.resolve({ ok: true, status: 200, text: async () => JSON.stringify(payload) });
   },
   setTimeout, clearTimeout, setInterval: () => 1, clearInterval: () => {},
   Blob: class { constructor(p) { this.parts = p; } },

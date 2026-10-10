@@ -1224,6 +1224,12 @@
     }
 
     function applyReply(data, httpStatus) {
+      // Worker 返回了非 JSON（多为 Cloudflare 错误页）：把状态码和响应片段直接显示出来
+      if (data && data.__nonJson) {
+        setStatus('err', 'Worker 返回了非 JSON 响应 · ' + data.message);
+        return;
+      }
+
       // 409：另一个页面正占着 Worker，交给用户决定"导入旧数据"还是"用本地数据替换"
       if (httpStatus === 409 || (data && data.code === 'owner_mismatch')) {
         blockedOwner = (data && data.owner && data.owner.host) || '另一个页面';
@@ -1263,6 +1269,31 @@
     function num(v, dflt) {
       const n = Number(v);
       return Number.isFinite(n) ? n : dflt;
+    }
+
+    /**
+     * 读响应体。Worker 出错时返回的可能是 HTML（Cloudflare 的错误页），
+     * 直接 r.json() 只会抛出 "JSON.parse: unexpected character"，没有排查价值。
+     * 这里统一按文本读，再尽力解析，解析不了就把响应片段原样带出来。
+     */
+    function readJson(r) {
+      return r.text().then(function (t) {
+        let data = null;
+        try { data = JSON.parse(t); } catch (e) { /* 非 JSON，例如 HTML 错误页 */ }
+
+        if (data) { data.__httpStatus = r.status; return data; }
+
+        const snippet = String(t).replace(/\s+/g, ' ').trim().slice(0, 100);
+        const hint = r.status === 404
+          ? '（地址可能写错了，或 Worker 还没重新部署）'
+          : (r.status >= 500 ? '（Worker 执行出错，检查 Cloudflare 日志）' : '');
+        return {
+          ok: 0,
+          __httpStatus: r.status,
+          __nonJson: true,
+          message: 'HTTP ' + r.status + hint + '：' + (snippet || '（空响应）')
+        };
+      });
     }
 
     /**
@@ -1322,7 +1353,7 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Sync-Token': cfg.token },
           body: buildPayload()
-        }).then(function (r) { return r.json().then(function (j) { return applyReply(j, r.status); }); });
+        }).then(function (r) { return readJson(r).then(function (j) { return applyReply(j, r.status); }); });
       };
 
       const doClaim = function () {
@@ -1331,7 +1362,7 @@
           headers: { 'Content-Type': 'application/json', 'X-Sync-Token': cfg.token },
           body: JSON.stringify({ clientId: clientId(), clientHost: location.host, mode: mode })
         }).then(function (r) {
-          return r.json().then(function (j) {
+          return readJson(r).then(function (j) {
             if (r.status !== 200 || !j || j.ok !== 1) {
               throw new Error((j && j.message) || ('接管失败 HTTP ' + r.status));
             }
@@ -1342,7 +1373,7 @@
 
       const pull = function () {
         return fetch(base() + '/snapshot', { headers: { 'X-Sync-Token': cfg.token } })
-          .then(function (r) { return r.json(); })
+          .then(readJson)
           .then(function (j) {
             if (!j || j.ok !== 1) throw new Error((j && j.message) || '导出失败');
             if (!j.rows || !j.rows.length) return false;
@@ -1398,7 +1429,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Sync-Token': cfg.token },
         body: buildPayload()
-      }).then(function (r) { return r.json().then(function (j) { return applyReply(j, r.status); }); })
+      }).then(function (r) { return readJson(r).then(function (j) { return applyReply(j, r.status); }); })
         .catch(function (e) { setStatus('err', '无法连接 Worker：' + (e && e.message ? e.message : e)); });
     }
 
@@ -1461,7 +1492,7 @@
       if (!ready()) { setStatus('err', '请先填写 Worker 地址与同步令牌'); return; }
       setStatus('save', '正在发送测试通知…');
       fetch(base() + '/test', { headers: { 'X-Sync-Token': cfg.token } })
-        .then(function (r) { return r.json().then(function (j) { return j; }); })
+        .then(readJson)
         .then(function (j) {
           if (j && j.ok === 1) setStatus('ok', '测试通知已发出，请查看 Server酱 App');
           else setStatus('err', '测试失败：code=' + (j && j.code != null ? j.code : '—') + ' ' + ((j && j.message) || ''));
@@ -1490,7 +1521,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Sync-Token': cfg.token },
         body: '{}'
-      }).then(function (r) { return r.json(); })
+      }).then(readJson)
         .then(function (j) {
           if (j && j.ok === 1) setStatus('ok', '已重置 ' + j.reset + ' 条产线的提醒标记');
           else setStatus('err', '重置失败：' + ((j && j.message) || ''));
