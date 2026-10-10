@@ -245,7 +245,53 @@ group('六、/sync 端点');
   eq((await ENV.STATE.get('row:y', 'json')).alerted, 2, '前端同步不会清掉 Worker 的提醒水位');
 }
 
-group('七、/test 与 /reset-alerts');
+group('七、SendKey 里解析 UID');
+{
+  eq(__test.deriveUid('sctp24339tauwt87osfuw9nyptebxxxx'), '24339', '标准 SendKey → 取出 UID');
+  eq(__test.deriveUid('SCTP24339TAUWT87OSFUW9NYPtebxxxx'), '24339', '大写前缀也能解析');
+  eq(__test.deriveUid('  sctp24339abc  '), '24339', '首尾空格被忽略');
+  eq(__test.deriveUid('sctp1abc'), '1', '单位数 UID');
+  eq(__test.deriveUid('sctp987654321xyz'), '987654321', '多位数 UID');
+  eq(__test.deriveUid('24339'), '24339', '直接填纯数字 UID 也认');
+  eq(__test.deriveUid('sctp'), '', '只有前缀 → 解析失败');
+  eq(__test.deriveUid('sctpabc123'), '', '前缀后不是数字 → 解析失败');
+  eq(__test.deriveUid('SCTxxxxxxxx'), '', '旧版 Turbo SendKey → 解析失败且不误判为数字');
+  eq(__test.deriveUid(''), '', '空串');
+  eq(__test.deriveUid(null), '', 'null 不炸');
+
+  eq(__test.resolveCredentials({}).ok, false, '什么都没配 → 不可用');
+  ok(String(__test.resolveCredentials({}).reason).includes('SC_SENDKEY'), '提示指明缺 SC_SENDKEY');
+
+  const onlyKey = __test.resolveCredentials({ SC_SENDKEY: 'sctp24339tauwt87osfuw9nyptebxxxx' });
+  eq([onlyKey.ok, onlyKey.uid, onlyKey.uidFrom], [true, '24339', 'sendkey'], '只配 SendKey 即可推送（UID 自动解析）');
+
+  const both = __test.resolveCredentials({ SC_SENDKEY: 'sctp24339aaa', SC_UID: '99999' });
+  eq([both.ok, both.uid, both.uidFrom], [true, '99999', 'env'], '显式 SC_UID 优先于解析结果');
+
+  const badKey = __test.resolveCredentials({ SC_SENDKEY: 'SCTxxxxxxxx' });
+  eq(badKey.ok, false, 'SendKey 格式不对 → 不可用');
+  ok(String(badKey.reason).includes('SC_UID'), '提示告知可以补一个 SC_UID');
+}
+
+group('八、只配 SendKey 时的真实推送 URL');
+{
+  reset();
+  // 刻意不提供 SC_UID，用一个真实的 SendKey 形态，验证地址里的 UID 是解析出来的
+  const REAL_KEY = 'sctp24339aaaa';
+  const envNoUid = Object.assign({}, ENV, { SC_SENDKEY: REAL_KEY, SC_UID: undefined });
+
+  await ENV.STATE.put('row:r1', JSON.stringify(rowAt({ stock: CAP_W - 100, prod: 15, cons: 2, ts: Date.now() })));
+  const pending = [];
+  await worker.scheduled({}, envNoUid, { waitUntil: p => { pending.push(p); return p; } });
+  await Promise.allSettled(pending);
+
+  eq(sentMessages.length, 1, '配了 SendKey 就能推出去');
+  eq(sentMessages[0].url, 'https://24339.push.ft07.com/send/' + REAL_KEY + '.send',
+    'UID 由 SendKey 自动解析（未配置 SC_UID）');
+  eq(formField(sentMessages[0].body, 'title'), '⚠ 即将爆仓：源矿', '解析 UID 后消息内容不受影响');
+}
+
+group('九、/test 与 /reset-alerts');
 {
   reset();
   let res = await worker.fetch(new Request('https://w.example/test'), ENV, {});
@@ -265,7 +311,7 @@ group('七、/test 与 /reset-alerts');
   eq((await ENV.STATE.get('row:z', 'json')).alerted, 0, '水位被清零');
 }
 
-group('八、边界与容错');
+group('十、边界与容错');
 {
   reset();
   let res = await worker.fetch(new Request('https://w.example/unknown'), ENV, {});

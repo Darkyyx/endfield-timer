@@ -190,7 +190,10 @@ function describeItem(item, now) {
 }
 
 /* 仅供本地 worker.test.mjs 调用；Cloudflare 只使用 default 导出，多一个具名导出不影响运行 */
-export const __test = { projectStock, evaluateLevel, decideAlert, composeMessage, describeItem };
+export const __test = {
+  projectStock, evaluateLevel, decideAlert, composeMessage, describeItem,
+  deriveUid, resolveCredentials
+};
 
 /* ================= Cloudflare 入口 ================= */
 
@@ -430,14 +433,47 @@ async function savePushStatus(env, patch) {
   await env.STATE.put('meta:status', JSON.stringify(Object.assign(prev, patch)));
 }
 
-async function pushServerChan(env, cfg, payload) {
-  const uid = env && env.SC_UID;
-  const key = env && env.SC_SENDKEY;
+/**
+ * 从 SendKey 解析 UID。
+ * Server酱³ 的 SendKey 形如 sctp<UID><随机串>（例：sctp24339tauwt87osfuw9nyptebxxxx → UID 24339），
+ * 所以 UID 是冗余信息，不必让用户再手填一遍（也少一个填错的地方）。
+ * 解析不出来（或 SendKey 格式与预期不符）时返回空串，由调用方决定报什么错。
+ */
+function deriveUid(sendkey) {
+  const k = String(sendkey == null ? '' : sendkey).trim();
+  if (!k) return '';
 
-  if (uid && key) {
+  const lower = k.toLowerCase();
+  if (lower.indexOf('sctp') === 0) return k.slice(4).match(/^\d+/)?.[0] || '';
+  if (/^\d+$/.test(k)) return k;   // 直接填了纯数字 UID 的情况
+  return '';
+}
+
+/** 推送凭据：SendKey 必需；UID 优先用显式配置，否则从 SendKey 里解析 */
+function resolveCredentials(env) {
+  const key = String((env && env.SC_SENDKEY) || '').trim();
+  if (!key) {
+    return { ok: false, reason: '未配置 SC_SENDKEY（在 Worker 的 Variables and Secrets 里添加）' };
+  }
+  const explicit = String((env && env.SC_UID) || '').trim();
+  const uid = explicit || deriveUid(key);
+  if (!uid) {
+    return {
+      ok: false,
+      reason: '无法从 SendKey 解析 UID，请检查 SC_SENDKEY 是否为 Server酱³ 的 SendKey'
+        + '（形如 sctp<UID><随机串>），或额外配置一个 SC_UID'
+    };
+  }
+  return { ok: true, uid: uid, key: key, uidFrom: explicit ? 'env' : 'sendkey' };
+}
+
+async function pushServerChan(env, cfg, payload) {
+  const cred = resolveCredentials(env);
+
+  if (cred.ok) {
     const endpoint = String(cfg.SC_ENDPOINT)
-      .replace('{uid}', encodeURIComponent(uid))
-      .replace('{key}', encodeURIComponent(key));
+      .replace('{uid}', encodeURIComponent(cred.uid))
+      .replace('{key}', encodeURIComponent(cred.key));
 
     const form = new URLSearchParams();
     form.set('title', payload.title);
@@ -470,8 +506,8 @@ async function pushServerChan(env, cfg, payload) {
     }
   }
 
-  // 没有凭据时只做干跑：写进状态里，前端能看到"未配置"而不是静默失败
-  return { ok: false, code: null, message: '未配置 SC_UID / SC_SENDKEY（干跑，未真正推送）' };
+  // 凭据不可用时只做干跑：把原因写进状态，前端能看到"配置有问题"而不是静默失败
+  return { ok: false, code: null, message: cred.reason + '（干跑，未真正推送）' };
 }
 
 /* ================= 定时巡检 ================= */

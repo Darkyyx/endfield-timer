@@ -29,9 +29,11 @@
 
 ### 第 1 步：准备 Server酱³
 
-1. 在 [Server酱³](https://sc3.ft07.com/) 注册，拿到 **UID** 与 **SendKey**。
+1. 在 [Server酱³](https://sc3.ft07.com/) 注册，拿到 **SendKey**（形如 `sctp<UID><随机串>`，例：`sctp24339tauwt87osfuw9nyptebxxxx`）。
 2. 在后台**只保留 App 通道**（本项目不推微信）。
 3. 顺便看一眼你的**每日推送条数上限**——决定你要不要收紧预警频率。
+
+> **UID 不用手填**：SendKey 里已经包含 UID（上面例子的 UID 就是 `24339`），Worker 会自动解析出来。
 
 ### 第 2 步：在 Cloudflare 建 KV 与 Worker
 
@@ -43,9 +45,9 @@
 
    | 名称 | 类型 | 说明 |
    |---|---|---|
-   | `SC_UID` | Secret | Server酱³ 的 UID |
-   | `SC_SENDKEY` | Secret | Server酱³ 的 SendKey |
+   | `SC_SENDKEY` | Secret | Server酱³ 的 SendKey（UID 会自动从里面解析） |
    | `SYNC_TOKEN` | Secret | 自己随便生成一串随机字符串，防止别人往你的 Worker 灌假数据 |
+   | `SC_UID` | Secret（**可选**） | 仅当 SendKey 不以 `sctp` 开头时才需要手动指定 |
    | `WARN_SECONDS` | 可选 | 兜底预警窗口秒数，默认 `1800`（30 分钟）。**页面设置面板里的值会覆盖它** |
 
 5. 添加定时触发器（Settings → Triggers → Cron）：**`*/5 * * * *`**（每 5 分钟）。
@@ -73,6 +75,11 @@
 - `GET https://<你的 Worker>/state` — 查看 Worker 掌握的行、等级与已提醒水位（需带 `X-Sync-Token` 头）。
 - `POST https://<你的 Worker>/reset-alerts` — 清空全部「已提醒」标记。
 - 页面状态灯显示**推送异常**时，消息区会显示 Server酱 返回的原始错误（如 Key 失效、额度用尽）。
+- 常见提示对照：
+  - `未配置 SC_SENDKEY` — 变量没配，或配完没重新 Deploy。
+  - `无法从 SendKey 解析 UID` — SendKey 不是 `sctp` 开头的格式，额外配一个 `SC_UID` 即可。
+  - `未绑定 KV 命名空间 STATE` — KV 绑定的变量名写错了，必须一字不差是 `STATE`。
+- **测试通知能收到、但从不自动预警** → 多半是 Cron Trigger 没加。
 
 ### 本地跑 Worker 自测
 
@@ -80,7 +87,7 @@
 node worker.test.mjs
 ```
 
-覆盖等级判定、一次性去抖（含「爆仓后挂 6 小时不重推」）、聚合消息、推送失败重试、`/sync` 鉴权与缺行清理等 67 项断言，不需要任何依赖。
+覆盖等级判定、一次性去抖（含「爆仓后挂 6 小时不重推」）、聚合消息、推送失败重试、SendKey 解析 UID、`/sync` 鉴权与缺行清理等 87 项断言，不需要任何依赖。
 
 ---
 
