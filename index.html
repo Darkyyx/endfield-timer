@@ -372,6 +372,77 @@
     font-family:var(--mono);font-size:12.5px;color:#4b545d;letter-spacing:.05em;
   }
 
+  /* ============ 通知（Server酱） ============ */
+  .hud .stats .nstat{display:inline-flex;align-items:center;gap:7px}
+  .nstat .dot{width:7px;height:7px;flex:0 0 auto;background:#3a424a;border-radius:50%}
+  .nstat .lbl{color:#5c666f}
+  .nstat.is-off .dot{background:#3a424a}
+  .nstat.is-idle .dot{background:var(--cyan)}
+  .nstat.is-ok{color:#7f8b95}
+  .nstat.is-ok .dot{background:var(--green);box-shadow:0 0 8px rgba(110,227,122,.7)}
+  .nstat.is-err{color:var(--red)}
+  .nstat.is-err .dot{background:var(--red);box-shadow:0 0 8px rgba(255,90,82,.7)}
+  .nstat.is-save .dot{background:var(--yellow)}
+
+  .ntPanel{margin-top:18px;border:1px solid var(--line);background:rgba(255,255,255,.014)}
+  .ntPanel > summary{
+    cursor:pointer;list-style:none;padding:13px 20px;
+    font-family:var(--mono);font-size:12.5px;letter-spacing:.18em;color:var(--dim);
+    transition:color .15s ease,background .15s ease;
+  }
+  .ntPanel > summary::-webkit-details-marker{display:none}
+  .ntPanel > summary:hover{color:var(--yellow);background:rgba(255,210,30,.045)}
+  .ntPanel[open] > summary{color:var(--yellow);border-bottom:1px solid var(--line)}
+  .ntPanel .sumDot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#3a424a;margin-right:10px}
+  .ntPanel[data-state="ok"] .sumDot{background:var(--green)}
+  .ntPanel[data-state="err"] .sumDot{background:var(--red)}
+  .ntPanel[data-state="save"] .sumDot{background:var(--yellow)}
+
+  .ntBody{padding:20px;display:flex;flex-direction:column;gap:16px}
+  .ntGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px 20px}
+  .ntGrid label{display:block}
+  .ntGrid .k{
+    display:block;font-size:12.5px;color:var(--dim);
+    letter-spacing:.1em;margin-bottom:6px;
+  }
+  .ntGrid .tip{
+    display:block;font-family:var(--mono);font-size:11.5px;color:#4b545d;
+    letter-spacing:.03em;margin-top:6px;line-height:1.5;
+  }
+  .ntGrid input[type=text],.ntGrid input[type=number]{
+    width:100%;font:inherit;font-size:14px;color:var(--txt);
+    background:rgba(255,255,255,.03);border:1px solid var(--line);
+    padding:9px 11px;outline:none;border-radius:0;
+    font-family:var(--mono);transition:border-color .15s ease;
+  }
+  .ntGrid input[type=text]:focus,.ntGrid input[type=number]:focus{
+    border-color:var(--yellow);background:rgba(255,210,30,.06);
+  }
+  .ntGrid input::placeholder{color:#3d454e}
+
+  .ntToggles{display:flex;flex-wrap:wrap;gap:10px 26px}
+  .ntChk{
+    display:inline-flex;align-items:center;gap:9px;cursor:pointer;
+    font-size:13.5px;color:#aab3bb;user-select:none;
+  }
+  .ntChk input{width:15px;height:15px;accent-color:var(--yellow);cursor:pointer;margin:0}
+
+  .ntActions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .btn.sm{padding:9px 17px;font-size:13px;letter-spacing:.09em}
+  .btn.ghost.red:hover{color:var(--red);border-color:rgba(255,90,82,.55);background:rgba(255,90,82,.08)}
+
+  .ntMsg{
+    font-family:var(--mono);font-size:12.5px;letter-spacing:.03em;
+    color:#5c666f;line-height:1.6;word-break:break-all;
+  }
+  .ntMsg.is-ok{color:var(--green-bright)}
+  .ntMsg.is-err{color:var(--red)}
+
+  @media (max-width:640px){
+    .ntBody{padding:15px}
+    .ntGrid{grid-template-columns:1fr}
+  }
+
   .foot{
     margin-top:44px;text-align:center;
     font-family:var(--mono);font-size:12px;
@@ -425,13 +496,48 @@
     </div>
   </div>
 
+  <details class="ntPanel" id="ntPanel" data-state="off">
+    <summary><span class="sumDot"></span>通知设置 · SERVERCHAN PUSH</summary>
+    <div class="ntBody">
+      <div class="ntGrid">
+        <label>
+          <span class="k">Worker 地址</span>
+          <input type="text" id="ntUrl" placeholder="https://xxx.workers.dev" autocomplete="off" spellcheck="false">
+          <span class="tip">在 Cloudflare 部署 worker.js 后得到的地址</span>
+        </label>
+        <label>
+          <span class="k">同步令牌</span>
+          <input type="text" id="ntToken" placeholder="与 Worker 的 SYNC_TOKEN 一致" autocomplete="off" spellcheck="false">
+          <span class="tip">防止别人向你的 Worker 写入假数据</span>
+        </label>
+        <label>
+          <span class="k">预警提前量（分钟）</span>
+          <input type="number" id="ntWarn" min="1" max="720" step="1" value="30">
+          <span class="tip">剩余时间进入该窗口时提醒一次</span>
+        </label>
+      </div>
+
+      <div class="ntToggles">
+        <label class="ntChk"><input type="checkbox" id="ntOn">开启通知</label>
+        <label class="ntChk"><input type="checkbox" id="ntWarnEmpty">耗尽方向也提醒</label>
+      </div>
+
+      <div class="ntActions">
+        <button class="btn sm" id="ntTest" type="button">发送测试通知</button>
+        <button class="btn ghost sm" id="ntNow" type="button">立即同步</button>
+        <button class="btn ghost sm red" id="ntReset" type="button">重置已提醒标记</button>
+        <span class="ntMsg" id="ntMsg">未开启 · 数据只保存在本机</span>
+      </div>
+    </div>
+  </details>
+
   <div class="toolbar">
     <button class="btn" id="addBtn">＋ 添加产物</button>
     <button class="btn ghost" id="clearBtn">清空全部</button>
     <span class="hint">数据自动保存在本机浏览器 · 上限：四号谷地 80,000 / 武陵 90,000</span>
   </div>
 
-  <div class="foot">TALOS-II // ENDFIELD INDUSTRY SYSTEM // v1.1.0</div>
+  <div class="foot">TALOS-II // ENDFIELD INDUSTRY SYSTEM // v1.2.0</div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -442,7 +548,8 @@
   'use strict';
 
   /* ================= 配置 ================= */
-  const STORE_KEY = 'endfield_line_timer_v1';
+  const STORE_KEY = 'endfield_line_timer_v2';
+  const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -451,6 +558,9 @@
   const statsEl  = document.getElementById('stats');
   const addBtn   = document.getElementById('addBtn');
   const clearBtn = document.getElementById('clearBtn');
+
+  /* 通知模块：在文件后段赋值（paintStats 会在启动阶段先跑到，所以这里必须提前声明） */
+  let notify = null;
 
   /* ================= 物品列表（来自 items.js） ================= */
   const FALLBACK_ITEMS = ['源石碎片', '碳素结晶', '精密零件'];
@@ -498,6 +608,9 @@
     }
   });
 
+  // 老数据迁移：只看不改也要落盘，否则数据会永远停在 v1 键上
+  if (migratedFromLegacy) save();
+
   function uid() {
     return 'r' + Math.random().toString(36).slice(2, 10);
   }
@@ -521,9 +634,17 @@
     ];
   }
 
+  /* 老数据迁移：v1 键存在而 v2 键不存在时沿用一次，并在下次保存后清理 v1。
+     用 var 而非 let：数据初始化段的迁移调用早于本行，let 会命中 TDZ。 */
+  var migratedFromLegacy = false;
+
   function load() {
     try {
-      const raw = localStorage.getItem(STORE_KEY);
+      let raw = localStorage.getItem(STORE_KEY);
+      if (!raw) {
+        raw = localStorage.getItem(STORE_KEY_LEGACY);
+        if (raw) migratedFromLegacy = true;
+      }
       if (!raw) return null;
       const data = JSON.parse(raw);
       if (!Array.isArray(data)) return null;
@@ -548,6 +669,10 @@
   function save() {
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(rows));
+      if (migratedFromLegacy) {
+        migratedFromLegacy = false;
+        localStorage.removeItem(STORE_KEY_LEGACY);
+      }
     } catch (e) { /* 忽略隐私模式等异常 */ }
   }
 
@@ -958,9 +1083,257 @@
 
     applyEditing(el, row);
     save();
+    notify.onEditingChange();
     paint(el, row);
     paintStats();
   }
+
+  /* ================= 通知（Server酱 经 Cloudflare Worker） ================= */
+  notify = (function () {
+    const CFG_KEY = 'endfield_notify_v1';
+    const HEARTBEAT = 60000;
+
+    const $ = function (id) { return document.getElementById(id); };
+    const urlEl = $('ntUrl');
+    const tokenEl = $('ntToken');
+    const warnEl = $('ntWarn');
+    const onEl = $('ntOn');
+    const emptyEl = $('ntWarnEmpty');
+    const testBtn = $('ntTest');
+    const nowBtn = $('ntNow');
+    const resetBtn = $('ntReset');
+    const msgEl = $('ntMsg');
+    const panelEl = $('ntPanel');
+
+    let status = 'off';       // off | idle | ok | err | save
+    let detail = '未开启 · 数据只保存在本机';
+    let lastPushAt = 0;
+    let syncTimer = null;
+    let wasEditing = false;
+
+    function loadCfg() {
+      let raw = null;
+      try { raw = JSON.parse(localStorage.getItem(CFG_KEY) || 'null'); } catch (e) { raw = null; }
+      const c = raw && typeof raw === 'object' ? raw : {};
+      return {
+        url: typeof c.url === 'string' ? c.url : '',
+        token: typeof c.token === 'string' ? c.token : '',
+        warn: Number.isFinite(Number(c.warn)) && Number(c.warn) > 0 ? Math.floor(Number(c.warn)) : 30,
+        on: !!c.on,
+        warnEmpty: c.warnEmpty !== false
+      };
+    }
+
+    let cfg = loadCfg();
+    const ready = function () { return !!cfg.url && !!cfg.token; };
+    const enabled = function () { return cfg.on && ready(); };
+    const base = function () { return cfg.url.replace(/\/+$/, ''); };
+
+    function persist() {
+      try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) { /* 忽略隐私模式等异常 */ }
+    }
+
+    function setStatus(state, text) {
+      status = state;
+      if (text) detail = text;
+      if (panelEl) panelEl.dataset.state = state;
+      if (msgEl) {
+        msgEl.textContent = detail;
+        msgEl.className = 'ntMsg' + (state === 'ok' ? ' is-ok' : (state === 'err' ? ' is-err' : ''));
+      }
+      paintStats();
+    }
+
+    function hostOf(u) {
+      try { return new URL(u).host; } catch (e) { return String(u).replace(/^https?:\/\//, '').split('/')[0]; }
+    }
+
+    function hudHtml() {
+      if (!cfg.on) return '<span class="nstat is-off"><i class="dot"></i><span class="lbl">通知 未开启</span></span>';
+      if (!ready()) return '<span class="nstat is-err"><i class="dot"></i><span class="lbl">通知 未配置地址或令牌</span></span>';
+
+      const label = {
+        off: '通知 未开启',
+        idle: '通知 待同步',
+        ok: '通知 正常',
+        err: '通知 异常',
+        save: '通知 同步中'
+      }[status] || '通知';
+
+      const cls = status === 'save' ? 'is-save'
+        : (status === 'err' ? 'is-err' : (status === 'ok' ? 'is-ok' : 'is-idle'));
+
+      return '<span class="nstat ' + cls + '"><i class="dot"></i><span class="lbl">'
+        + escAttr(label) + ' · ' + escAttr(hostOf(cfg.url)) + '</span></span>';
+    }
+
+    /* 与 Worker 的 projectStock 对齐：同步的是时间锚点，不是当前数值 */
+    function buildPayload() {
+      const t = Date.now();
+      const list = [];
+      rows.forEach(function (r) {
+        list.push({
+          id: r.id,
+          name: r.name,
+          region: r.region,
+          prod: r.prod,
+          cons: r.cons,
+          stock: r.stock,
+          ts: (typeof r.ts === 'number' && r.ts > 0) ? r.ts : t
+        });
+      });
+      return JSON.stringify({ v: 1, clientTs: t, warnMinutes: cfg.warn, rows: list });
+    }
+
+    function applyReply(data) {
+      if (!data || data.ok !== 1) {
+        setStatus('err', '同步失败：' + ((data && data.message) || '未知错误'));
+        return;
+      }
+      lastPushAt = Number(data.lastPushAt) || 0;
+      if (data.lastPushOk === false && data.lastError) {
+        setStatus('err', '推送异常：' + data.lastError);
+      } else {
+        setStatus('ok', '已同步 ' + data.rows + ' 条 · '
+          + (lastPushAt ? ('最近推送 ' + new Date(lastPushAt).toLocaleTimeString('zh-CN')) : '尚未推送'));
+      }
+    }
+
+    function syncNow() {
+      if (!enabled()) {
+        setStatus(cfg.on ? 'err' : 'off', cfg.on ? '未填写 Worker 地址或同步令牌' : '未开启 · 数据只保存在本机');
+        return Promise.resolve();
+      }
+      setStatus('save', '正在同步…');
+      return fetch(base() + '/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Sync-Token': cfg.token },
+        body: buildPayload()
+      }).then(function (r) { return r.json(); })
+        .then(applyReply)
+        .catch(function (e) { setStatus('err', '无法连接 Worker：' + (e && e.message ? e.message : e)); });
+    }
+
+    function scheduleSync(delay) {
+      if (!enabled()) return;
+      clearTimeout(syncTimer);
+      syncTimer = setTimeout(syncNow, typeof delay === 'number' ? delay : 1500);
+    }
+
+    function beacon() {
+      if (!enabled() || !navigator.sendBeacon) return;
+      try {
+        navigator.sendBeacon(base() + '/sync',
+          new Blob([buildPayload()], { type: 'application/json' }));
+      } catch (e) { /* 忽略 */ }
+    }
+
+    function refreshCfg() {
+      cfg.url = String(urlEl.value || '').trim().replace(/\/+$/, '');
+      cfg.token = String(tokenEl.value || '').trim();
+      const w = parseInt(warnEl.value, 10);
+      cfg.warn = (Number.isFinite(w) && w > 0) ? w : 30;
+      cfg.on = !!onEl.checked;
+      cfg.warnEmpty = !!emptyEl.checked;
+      persist();
+    }
+
+    function onEditingChange() {
+      let editing = false;
+      rows.forEach(function (r) { if (r.editing) editing = true; });
+      if (wasEditing && !editing) {
+        scheduleSync(900);          // 退出编辑态 → 尽快把最新锚点交给 Worker
+      } else if (!wasEditing && editing) {
+        clearTimeout(syncTimer);    // 进入编辑态 → 暂停推送，避开打字中间态
+      }
+      wasEditing = editing;
+    }
+
+    /* ---- 面板事件 ---- */
+    [urlEl, tokenEl, warnEl].forEach(function (el) {
+      el.addEventListener('input', function () {
+        refreshCfg();
+        if (cfg.on && !ready()) setStatus('err', '未填写 Worker 地址或同步令牌');
+        else if (enabled()) { setStatus('idle', '设置已更新，正在同步…'); scheduleSync(600); }
+        else setStatus('off', '未开启 · 数据只保存在本机');
+      });
+    });
+
+    [onEl, emptyEl].forEach(function (el) {
+      el.addEventListener('change', function () {
+        refreshCfg();
+        if (!cfg.on) { clearTimeout(syncTimer); setStatus('off', '未开启 · 数据只保存在本机'); return; }
+        if (!ready()) { setStatus('err', '未填写 Worker 地址或同步令牌'); return; }
+        scheduleSync(200);
+      });
+    });
+
+    testBtn.addEventListener('click', function () {
+      refreshCfg();
+      if (!ready()) { setStatus('err', '请先填写 Worker 地址与同步令牌'); return; }
+      setStatus('save', '正在发送测试通知…');
+      fetch(base() + '/test', { headers: { 'X-Sync-Token': cfg.token } })
+        .then(function (r) { return r.json().then(function (j) { return j; }); })
+        .then(function (j) {
+          if (j && j.ok === 1) setStatus('ok', '测试通知已发出，请查看 Server酱 App');
+          else setStatus('err', '测试失败：code=' + (j && j.code != null ? j.code : '—') + ' ' + ((j && j.message) || ''));
+        })
+        .catch(function (e) { setStatus('err', '无法连接 Worker：' + (e && e.message ? e.message : e)); });
+    });
+
+    nowBtn.addEventListener('click', function () {
+      refreshCfg();
+      syncNow();
+    });
+
+    resetBtn.addEventListener('click', function () {
+      refreshCfg();
+      if (!ready()) { setStatus('err', '请先填写 Worker 地址与同步令牌'); return; }
+      if (!confirm('重置后，已经提醒过的产线会被允许再次提醒。确定吗？')) return;
+      setStatus('save', '正在重置…');
+      fetch(base() + '/reset-alerts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Sync-Token': cfg.token },
+        body: '{}'
+      }).then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (j && j.ok === 1) setStatus('ok', '已重置 ' + j.reset + ' 条产线的提醒标记');
+          else setStatus('err', '重置失败：' + ((j && j.message) || ''));
+        })
+        .catch(function (e) { setStatus('err', '无法连接 Worker：' + (e && e.message ? e.message : e)); });
+    });
+
+    /* ---- 启动 ---- */
+    urlEl.value = cfg.url;
+    tokenEl.value = cfg.token;
+    warnEl.value = String(cfg.warn);
+    onEl.checked = cfg.on;
+    emptyEl.checked = cfg.warnEmpty;
+    setStatus(
+      cfg.on ? (ready() ? 'idle' : 'err') : 'off',
+      cfg.on ? (ready() ? '等待首次同步…' : '未填写 Worker 地址或同步令牌') : '未开启 · 数据只保存在本机'
+    );
+
+    setInterval(function () { if (enabled() && !wasEditing) syncNow(); }, HEARTBEAT);
+
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) { refreshCfg(); scheduleSync(300); }
+    });
+    window.addEventListener('pagehide', beacon);
+
+    return {
+      hudHtml: hudHtml,
+      scheduleSync: scheduleSync,
+      syncNow: syncNow,
+      onEditingChange: onEditingChange,
+      state: function () {
+        return {
+          status: status, detail: detail,
+          warnMinutes: cfg.warn, warnEmpty: cfg.warnEmpty, enabled: enabled()
+        };
+      }
+    };
+  })();
 
   /* ================= 局部刷新 ================= */
   function paint(el, row) {
@@ -1035,7 +1408,8 @@
     statsEl.innerHTML =
       '<span>产物 <b>' + rows.length + '</b></span>' +
       '<span class="soon">1h 内爆仓 <b>' + soon + '</b></span>' +
-      '<span class="drain">1h 内耗尽 <b>' + drain + '</b></span>';
+      '<span class="drain">1h 内耗尽 <b>' + drain + '</b></span>' +
+      (notify ? notify.hudHtml() : '');
   }
 
   /* ================= 每秒刷新 ================= */
