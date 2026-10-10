@@ -355,7 +355,7 @@ async function handleSync(request, env, cfg) {
     const next = {
       id: raw.id,
       name: typeof raw.name === 'string' ? raw.name : String(prev.name || ''),
-      account: typeof raw.account === 'string' ? raw.account : String(prev.account || ''),
+      remark: typeof raw.remark === 'string' ? raw.remark : String(prev.remark || ''),
       region: CAPS[raw.region] ? raw.region : 'wuling',
       prod: Math.max(0, num(raw.prod)),
       cons: Math.max(0, num(raw.cons)),
@@ -480,7 +480,7 @@ async function handleSnapshot(request, env, cfg) {
     out.push({
       id: row.id,
       name: row.name,
-      account: row.account || '',
+      remark: row.remark || '',
       region: CAPS[row.region] ? row.region : 'wuling',
       prod: num(row.prod),
       cons: num(row.cons),
@@ -513,7 +513,7 @@ async function handleState(request, env, cfg) {
     out.push({
       id: row.id,
       name: row.name,
-      account: row.account || '',
+      remark: row.remark || '',
       region: row.region,
       alerted: num(row.alerted),
       misses: num(row.misses),

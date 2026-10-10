@@ -33,7 +33,7 @@ const req = (path, body, headers) => new Request('https://w.example' + path, {
 
 const rowPayload = (client, over) => Object.assign({
   v: 2, clientId: client, clientHost: client, warnMinutes: 30,
-  rows: [{ id: 'r1', name: '源矿', account: '主账号', region: 'wuling', prod: 15, cons: 2, stock: 89950, ts: Date.now() }]
+  rows: [{ id: 'r1', name: '源矿', remark: '主账号', region: 'wuling', prod: 15, cons: 2, stock: 89950, ts: Date.now() }]
 }, over || {});
 
 console.log('A. Worker 数据源归属');
@@ -64,9 +64,9 @@ await check('/snapshot 能导出旧页面的完整数据（含备注列）', asy
   const res = await worker.fetch(req('/snapshot', undefined), ENV, {});
   const j = await res.json();
   assert(j.ok === 1 && j.rows.length === 1, '导出失败');
-  assert(j.rows[0].account === '主账号', '备注列丢失：' + JSON.stringify(j.rows[0]));
+  assert(j.rows[0].remark === '主账号', '备注列丢失：' + JSON.stringify(j.rows[0]));
   assert(typeof j.rows[0].ts === 'number' && j.rows[0].ts > 0, '缺少时间锚点');
-  return '1 条，含 account="主账号" 与 ts';
+  return '1 条，含 remark="主账号" 与 ts';
 });
 
 await check('/snapshot 需要令牌', async () => {
@@ -193,7 +193,7 @@ store.set('endfield_notify_v1', JSON.stringify({
   url: 'https://demo.workers.dev', token: 'tok', warn: 30, on: true, warnEmpty: true
 }));
 store.set('endfield_line_timer_v2', JSON.stringify([
-  { id: 'local1', name: '赤铜块', account: '本地', region: 'gudi', prod: 5, cons: 1, stock: 1000, ts: Date.now(), editing: false }
+  { id: 'local1', name: '赤铜块', remark: '本地', region: 'gudi', prod: 5, cons: 1, stock: 1000, ts: Date.now(), editing: false }
 ]));
 
 const calls = [];
@@ -237,7 +237,7 @@ const sandbox = {
     if (u.endsWith('/snapshot')) {
       payload = {
         ok: 1,
-        rows: [{ id: 'old1', name: '源矿', account: '主账号', region: 'wuling', prod: 15, cons: 2, stock: 89950, ts: 1756000000000 }],
+        rows: [{ id: 'old1', name: '源矿', remark: '主账号', region: 'wuling', prod: 15, cons: 2, stock: 89950, ts: 1756000000000 }],
         owner: { host: 'old.example', since: 1 }
       };
     } else if (u.endsWith('/claim')) {
@@ -311,7 +311,7 @@ await check('旧数据已写入本页面 localStorage（含备注列与时间锚
   const arr = JSON.parse(store.get('endfield_line_timer_v2'));
   assert(arr.length === 1, '行数 = ' + arr.length);
   assert(arr[0].id === 'old1', 'id = ' + arr[0].id + '（仍是本地数据，说明导入没生效）');
-  assert(arr[0].account === '主账号', '备注列丢失');
+  assert(arr[0].remark === '主账号', '备注列丢失');
   assert(arr[0].region === 'wuling', '地区 = ' + arr[0].region);
   assert(arr[0].ts === 1756000000000, '时间锚点未保留：' + arr[0].ts);
   return '1 条（源矿 / 主账号 / wuling），锚点原样保留';
