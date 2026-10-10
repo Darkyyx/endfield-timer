@@ -68,8 +68,11 @@ function projectStock(row, now) {
  *   1 = 即将爆仓   2 = 已爆仓
  *   3 = 即将耗尽   4 = 已耗尽
  * 注意：产销平衡（net = 0）一律返回 0。刚添加、还没填数据的行也返回 0。
+ * types 用来按方向开关：{ full, empty }，关掉的方向直接返回 0（不提醒也不占水位）。
  */
-function evaluateLevel(row, now, warnSeconds) {
+function evaluateLevel(row, now, warnSeconds, types) {
+  const t = types || { full: true, empty: true };
+
   // 刚点「添加产物」、三项都是 0 的空行：不参与提醒
   if (num(row.stock) === 0 && num(row.prod) === 0 && num(row.cons) === 0) return 0;
 
@@ -82,10 +85,13 @@ function evaluateLevel(row, now, warnSeconds) {
   const stock = projectStock(row, now);
 
   if (net > 0) {
+    if (!t.full) return 0;
     if (stock >= cap) return 2;
     if (stock + net * warnSeconds / 60 >= cap) return 1;
     return 0;
   }
+
+  if (!t.empty) return 0;
 
   if (stock <= 0) return 4;
   if (stock + net * warnSeconds / 60 <= 0) return 3;
@@ -192,7 +198,7 @@ function describeItem(item, now) {
 /* 仅供本地 worker.test.mjs 调用；Cloudflare 只使用 default 导出，多一个具名导出不影响运行 */
 export const __test = {
   projectStock, evaluateLevel, decideAlert, composeMessage, describeItem,
-  deriveUid, resolveCredentials
+  deriveUid, resolveCredentials, effectiveConfig
 };
 
 /* ================= Cloudflare 入口 ================= */
@@ -268,12 +274,21 @@ function checkToken(request, env) {
   return readToken(request) === expect;
 }
 
-/** 预警窗口秒数：以前端同步过来的 warnMinutes 为准，未同步时用 Worker 自己的 WARN_SECONDS */
-async function effectiveWarnSeconds(env, cfg) {
+/**
+ * 读取前端下发的运行配置（预警窗口 + 提醒方向）。
+ * KV 里的值是权威（页面改设置时会同步过来），缺失时退回 Worker 自己的默认值。
+ */
+async function effectiveConfig(env, cfg) {
   const meta = (await env.STATE.get('meta:config', 'json')) || {};
   const m = num(meta.warnMinutes);
-  if (m > 0) return Math.min(720, m) * 60;
-  return num(cfg.WARN_SECONDS);
+  const at = meta.alertTypes && typeof meta.alertTypes === 'object' ? meta.alertTypes : {};
+  return {
+    warnSeconds: m > 0 ? Math.min(720, m) * 60 : num(cfg.WARN_SECONDS),
+    types: {
+      full: at.full !== false,
+      empty: at.empty !== false
+    }
+  };
 }
 
 /* ================= /sync ================= */
@@ -316,13 +331,19 @@ async function handleSync(request, env, cfg) {
     await env.STATE.put('meta:owner', JSON.stringify(owner));
   }
 
-  // 前端设置面板里的"预警提前量"以这里为准，避免两处配置打架
+  // 前端设置面板里的"预警提前量"与"提醒方向"以这里为准，避免两处配置打架
   const warnMinutes = num(body && body.warnMinutes);
-  if (warnMinutes > 0) {
-    await env.STATE.put('meta:config', JSON.stringify({
-      warnMinutes: Math.min(720, warnMinutes),
+  const at = (body && body.alertTypes) || null;
+  if (warnMinutes > 0 || at) {
+    const prev = (await env.STATE.get('meta:config', 'json')) || {};
+    const next = {
+      warnMinutes: warnMinutes > 0 ? Math.min(720, warnMinutes) : num(prev.warnMinutes) || 30,
+      alertTypes: at
+        ? { full: at.full !== false, empty: at.empty !== false }
+        : (prev.alertTypes || { full: true, empty: true }),
       updatedAt: Date.now()
-    }));
+    };
+    await env.STATE.put('meta:config', JSON.stringify(next));
   }
 
   for (let i = 0; i < incoming.length; i++) {
@@ -483,7 +504,7 @@ async function handleState(request, env, cfg) {
   if (!checkToken(request, env)) return json({ ok: 0, message: '令牌错误' }, 401);
 
   const now = Date.now();
-  const warnSeconds = await effectiveWarnSeconds(env, cfg);
+  const { warnSeconds, types } = await effectiveConfig(env, cfg);
   const out = [];
   const list = await env.STATE.list({ prefix: 'row:' });
   for (const k of list.keys) {
@@ -496,7 +517,7 @@ async function handleState(request, env, cfg) {
       region: row.region,
       alerted: num(row.alerted),
       misses: num(row.misses),
-      level: evaluateLevel(row, now, warnSeconds),
+      level: evaluateLevel(row, now, warnSeconds, types),
       stock: Math.round(projectStock(row, now))
     });
   }
@@ -642,7 +663,7 @@ async function runPatrol(env, cfg) {
   if (!env || !env.STATE) return;
 
   const now = Date.now();
-  const warnSeconds = await effectiveWarnSeconds(env, cfg);
+  const { warnSeconds, types } = await effectiveConfig(env, cfg);
   const retryCooldown = num(cfg.PUSH_RETRY_COOLDOWN_MS);
 
   const list = await env.STATE.list({ prefix: 'row:' });
@@ -652,7 +673,7 @@ async function runPatrol(env, cfg) {
     const row = await env.STATE.get(k.name, 'json');
     if (!row) continue;
 
-    const level = evaluateLevel(row, now, warnSeconds);
+    const level = evaluateLevel(row, now, warnSeconds, types);
     const decision = decideAlert(row, level);
 
     if (!decision) continue;

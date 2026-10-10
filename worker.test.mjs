@@ -291,7 +291,80 @@ group('八、只配 SendKey 时的真实推送 URL');
   eq(formField(sentMessages[0].body, 'title'), '⚠ 即将爆仓：源矿', '解析 UID 后消息内容不受影响');
 }
 
-group('九、/test 与 /reset-alerts');
+group('九、爆仓 / 耗尽 两个方向可分别开关');
+{
+  const now = Date.now();
+  const warn = 1800;
+  const both = { full: true, empty: true };
+  const onlyFull = { full: true, empty: false };
+  const onlyEmpty = { full: false, empty: true };
+  const neither = { full: false, empty: false };
+  const mk = (o) => Object.assign({ region: 'wuling', prod: 0, cons: 0, stock: 0, ts: now }, o);
+
+  // 爆仓方向：净 +100/分，距上限 1000 → 10 分钟封顶
+  const fullRow = mk({ prod: 100, cons: 0, stock: 89000 });
+  // 耗尽方向：净 −100/分，存量 3000 → 30 分钟内归零
+  const emptyRow = mk({ prod: 0, cons: 100, stock: 3000 });
+
+  eq(__test.evaluateLevel(fullRow, now, warn, both), 1, '两个方向都开 → 爆仓方向正常预警');
+  eq(__test.evaluateLevel(emptyRow, now, warn, both), 3, '两个方向都开 → 耗尽方向正常预警');
+
+  eq(__test.evaluateLevel(fullRow, now, warn, onlyEmpty), 0, '只开耗尽 → 爆仓方向不提醒');
+  eq(__test.evaluateLevel(emptyRow, now, warn, onlyEmpty), 3, '只开耗尽 → 耗尽方向照常');
+
+  eq(__test.evaluateLevel(fullRow, now, warn, onlyFull), 1, '只开爆仓 → 爆仓方向照常');
+  eq(__test.evaluateLevel(emptyRow, now, warn, onlyFull), 0, '只开爆仓 → 耗尽方向不提醒');
+
+  eq(__test.evaluateLevel(fullRow, now, warn, neither), 0, '两个都关 → 都不提醒');
+  eq(__test.evaluateLevel(emptyRow, now, warn, neither), 0, '两个都关 → 都不提醒');
+
+  eq(__test.evaluateLevel(mk({ prod: 100, cons: 0, stock: 90000 }), now, warn, onlyEmpty), 0,
+    '只开耗尽 → 已爆仓也不提醒');
+  eq(__test.evaluateLevel(mk({ prod: 0, cons: 100, stock: 0 }), now, warn, onlyFull), 0,
+    '只开爆仓 → 已耗尽也不提醒');
+
+  eq(__test.evaluateLevel(fullRow, now, warn), 1, '未传方向参数时按两个都开处理（向后兼容）');
+}
+
+group('十、方向开关走完整巡检链路');
+{
+  reset();
+  const mk = (o) => Object.assign({
+    id: 'r1', name: '源矿', region: 'wuling', prod: 0, cons: 100, stock: 3000,
+    ts: Date.now(), alerted: 0, lastAttemptAt: 0, lastError: null, misses: 0
+  }, o);
+
+  // 先把"只提醒爆仓方向"同步给 Worker（模拟用户在面板上关掉耗尽）
+  const res = await worker.fetch(postJSON('/sync', {
+    v: 2, clientId: 'cT', clientHost: 'page', warnMinutes: 30,
+    alertTypes: { full: true, empty: false }, rows: []
+  }, { 'X-Sync-Token': 'tok' }), ENV, {});
+  eq((await res.json()).ok, 1, '方向设置同步成功');
+  eq((await ENV.STATE.get('meta:config', 'json')).alertTypes.empty, false, 'meta:config 记录了 empty = false');
+
+  await ENV.STATE.put('row:r1', JSON.stringify(mk({})));
+  await patrol();
+  eq(sentMessages.length, 0, '耗尽方向关闭时，即使真的快耗尽也不推送');
+
+  // 打开耗尽方向
+  await worker.fetch(postJSON('/sync', {
+    v: 2, clientId: 'cT', clientHost: 'page', warnMinutes: 30,
+    alertTypes: { full: true, empty: true }, rows: []
+  }, { 'X-Sync-Token': 'tok' }), ENV, {});
+  await ENV.STATE.put('row:r1', JSON.stringify(mk({})));
+  await patrol();
+  eq(sentMessages.length, 1, '重新打开后立刻推送（关闭期间不占用提醒水位）');
+  eq(formField(sentMessages[0].body, 'tags'), '即将耗尽', '推的是耗尽方向');
+
+  // 只同步预警窗口、不带方向时，方向设置不能被冲掉
+  await worker.fetch(postJSON('/sync', {
+    v: 2, clientId: 'cT', clientHost: 'page', warnMinutes: 45, rows: []
+  }, { 'X-Sync-Token': 'tok' }), ENV, {});
+  const cfgMeta = await ENV.STATE.get('meta:config', 'json');
+  eq([cfgMeta.warnMinutes, cfgMeta.alertTypes.empty], [45, true], '只改预警窗口不会重置方向设置');
+}
+
+group('十一、/test 与 /reset-alerts');
 {
   reset();
   let res = await worker.fetch(new Request('https://w.example/test'), ENV, {});
@@ -311,7 +384,7 @@ group('九、/test 与 /reset-alerts');
   eq((await ENV.STATE.get('row:z', 'json')).alerted, 0, '水位被清零');
 }
 
-group('十、边界与容错');
+group('十二、边界与容错');
 {
   reset();
   let res = await worker.fetch(new Request('https://w.example/unknown'), ENV, {});

@@ -519,7 +519,8 @@
 
       <div class="ntToggles">
         <label class="ntChk"><input type="checkbox" id="ntOn">开启通知</label>
-        <label class="ntChk"><input type="checkbox" id="ntWarnEmpty">耗尽方向也提醒</label>
+        <label class="ntChk"><input type="checkbox" id="ntWarnFull">爆仓方向（生产 &gt; 消耗）</label>
+        <label class="ntChk"><input type="checkbox" id="ntWarnEmpty">耗尽方向（消耗 &gt; 生产）</label>
       </div>
 
       <div class="ntActions">
@@ -1101,6 +1102,7 @@
     const tokenEl = $('ntToken');
     const warnEl = $('ntWarn');
     const onEl = $('ntOn');
+    const fullEl = $('ntWarnFull');
     const emptyEl = $('ntWarnEmpty');
     const testBtn = $('ntTest');
     const nowBtn = $('ntNow');
@@ -1135,12 +1137,15 @@
       let raw = null;
       try { raw = JSON.parse(localStorage.getItem(CFG_KEY) || 'null'); } catch (e) { raw = null; }
       const c = raw && typeof raw === 'object' ? raw : {};
+      // 老配置里只有 warnEmpty（且默认开启），迁移时让爆仓方向保持开启
+      const legacyEmpty = c.warnEmpty !== false;
       return {
         url: normalizeUrl(c.url),
         token: typeof c.token === 'string' ? c.token : '',
         warn: Number.isFinite(Number(c.warn)) && Number(c.warn) > 0 ? Math.floor(Number(c.warn)) : 30,
         on: !!c.on,
-        warnEmpty: c.warnEmpty !== false
+        warnFull: typeof c.warnFull === 'boolean' ? c.warnFull : true,
+        warnEmpty: typeof c.warnEmpty === 'boolean' ? c.warnEmpty : legacyEmpty
       };
     }
 
@@ -1230,9 +1235,15 @@
         clientHost: location.host,
         clientTs: t,
         warnMinutes: cfg.warn,
+        alertTypes: alertTypes(),
         rows: list
       };
       return JSON.stringify(extra ? Object.assign(body, extra) : body);
+    }
+
+    /** 当前启用的提醒方向，随快照一起同步给 Worker */
+    function alertTypes() {
+      return { full: !!cfg.warnFull, empty: !!cfg.warnEmpty };
     }
 
     function applyReply(data, httpStatus) {
@@ -1465,6 +1476,7 @@
       const w = parseInt(warnEl.value, 10);
       cfg.warn = (Number.isFinite(w) && w > 0) ? w : 30;
       cfg.on = !!onEl.checked;
+      cfg.warnFull = !!fullEl.checked;
       cfg.warnEmpty = !!emptyEl.checked;
       // 把补全后的地址回填到输入框，让用户看到实际会请求到哪里
       if (urlEl.value !== cfg.url) urlEl.value = cfg.url;
@@ -1492,12 +1504,12 @@
       });
     });
 
-    [onEl, emptyEl].forEach(function (el) {
+    [onEl, fullEl, emptyEl].forEach(function (el) {
       el.addEventListener('change', function () {
         refreshCfg();
         if (!cfg.on) { clearTimeout(syncTimer); setStatus('off', '未开启 · 数据只保存在本机'); return; }
         if (!ready()) { setStatus('err', '未填写 Worker 地址或同步令牌'); return; }
-        scheduleSync(200);
+        scheduleSync(200);   // 提醒方向变了，把设置同步给 Worker
       });
     });
 
@@ -1548,6 +1560,7 @@
     tokenEl.value = cfg.token;
     warnEl.value = String(cfg.warn);
     onEl.checked = cfg.on;
+    fullEl.checked = cfg.warnFull;
     emptyEl.checked = cfg.warnEmpty;
     setStatus(
       cfg.on ? (ready() ? 'idle' : 'err') : 'off',
