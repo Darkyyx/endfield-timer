@@ -525,6 +525,7 @@
       <div class="ntActions">
         <button class="btn sm" id="ntTest" type="button">发送测试通知</button>
         <button class="btn ghost sm" id="ntNow" type="button">立即同步</button>
+        <button class="btn sm" id="ntClaim" type="button" style="display:none">接管为通知源</button>
         <button class="btn ghost sm red" id="ntReset" type="button">重置已提醒标记</button>
         <span class="ntMsg" id="ntMsg">未开启 · 数据只保存在本机</span>
       </div>
@@ -1091,6 +1092,8 @@
   /* ================= 通知（Server酱 经 Cloudflare Worker） ================= */
   notify = (function () {
     const CFG_KEY = 'endfield_notify_v1';
+    const CLIENT_KEY = 'endfield_client_v1';       // 本 origin 的身份，用于区分"哪个页面是通知源"
+    const DECLINE_KEY = 'endfield_import_declined'; // 记下"这次不导入"，避免每 60 秒反复问
     const HEARTBEAT = 60000;
 
     const $ = function (id) { return document.getElementById(id); };
@@ -1102,14 +1105,19 @@
     const testBtn = $('ntTest');
     const nowBtn = $('ntNow');
     const resetBtn = $('ntReset');
+    const claimBtn = $('ntClaim');
     const msgEl = $('ntMsg');
     const panelEl = $('ntPanel');
 
-    let status = 'off';       // off | idle | ok | err | save
+    let status = 'off';       // off | idle | ok | err | save | blocked
     let detail = '未开启 · 数据只保存在本机';
     let lastPushAt = 0;
     let syncTimer = null;
     let wasEditing = false;
+    let blockedOwner = '';    // 当前占着 Worker 的那个页面
+    let foreignRows = 0;      // Worker 里属于别的页面的残留行数
+    let readOnly = false;     // 用户选了"不导入"，本页面保持只读
+    let claiming = false;
 
     function loadCfg() {
       let raw = null;
@@ -1124,6 +1132,24 @@
       };
     }
 
+    /* 本 origin 的稳定身份。换域名就是新身份，从而触发"要不要导入旧数据"的询问 */
+    function clientId() {
+      let id = '';
+      try { id = localStorage.getItem(CLIENT_KEY) || ''; } catch (e) { id = ''; }
+      if (!id) {
+        id = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+        try { localStorage.setItem(CLIENT_KEY, id); } catch (e) { /* 忽略 */ }
+      }
+      return id;
+    }
+
+    function declinedFor() {
+      try { return localStorage.getItem(DECLINE_KEY) || ''; } catch (e) { return ''; }
+    }
+    function setDeclined(v) {
+      try { v ? localStorage.setItem(DECLINE_KEY, v) : localStorage.removeItem(DECLINE_KEY); } catch (e) { /* 忽略 */ }
+    }
+
     let cfg = loadCfg();
     const ready = function () { return !!cfg.url && !!cfg.token; };
     const enabled = function () { return cfg.on && ready(); };
@@ -1136,11 +1162,12 @@
     function setStatus(state, text) {
       status = state;
       if (text) detail = text;
-      if (panelEl) panelEl.dataset.state = state;
+      if (panelEl) panelEl.dataset.state = (state === 'blocked' ? 'err' : state);
       if (msgEl) {
         msgEl.textContent = detail;
-        msgEl.className = 'ntMsg' + (state === 'ok' ? ' is-ok' : (state === 'err' ? ' is-err' : ''));
+        msgEl.className = 'ntMsg' + (state === 'ok' ? ' is-ok' : (state === 'err' || state === 'blocked' ? ' is-err' : ''));
       }
+      if (claimBtn) claimBtn.style.display = (state === 'blocked' || readOnly) ? '' : 'none';
       paintStats();
     }
 
@@ -1157,24 +1184,27 @@
         idle: '通知 待同步',
         ok: '通知 正常',
         err: '通知 异常',
-        save: '通知 同步中'
+        save: '通知 同步中',
+        blocked: '通知 待确认（非通知源）'
       }[status] || '通知';
 
       const cls = status === 'save' ? 'is-save'
-        : (status === 'err' ? 'is-err' : (status === 'ok' ? 'is-ok' : 'is-idle'));
+        : (status === 'blocked' ? 'is-err'
+          : (status === 'err' ? 'is-err' : (status === 'ok' ? 'is-ok' : 'is-idle')));
 
       return '<span class="nstat ' + cls + '"><i class="dot"></i><span class="lbl">'
         + escAttr(label) + ' · ' + escAttr(hostOf(cfg.url)) + '</span></span>';
     }
 
     /* 与 Worker 的 projectStock 对齐：同步的是时间锚点，不是当前数值 */
-    function buildPayload() {
+    function buildPayload(extra) {
       const t = Date.now();
       const list = [];
       rows.forEach(function (r) {
         list.push({
           id: r.id,
           name: r.name,
+          account: r.account || '',
           region: r.region,
           prod: r.prod,
           cons: r.cons,
@@ -1182,21 +1212,177 @@
           ts: (typeof r.ts === 'number' && r.ts > 0) ? r.ts : t
         });
       });
-      return JSON.stringify({ v: 1, clientTs: t, warnMinutes: cfg.warn, rows: list });
+      const body = {
+        v: 2,
+        clientId: clientId(),
+        clientHost: location.host,
+        clientTs: t,
+        warnMinutes: cfg.warn,
+        rows: list
+      };
+      return JSON.stringify(extra ? Object.assign(body, extra) : body);
     }
 
-    function applyReply(data) {
+    function applyReply(data, httpStatus) {
+      // 409：另一个页面正占着 Worker，交给用户决定"导入旧数据"还是"用本地数据替换"
+      if (httpStatus === 409 || (data && data.code === 'owner_mismatch')) {
+        blockedOwner = (data && data.owner && data.owner.host) || '另一个页面';
+        foreignRows = num(data && data.rows, 0);
+        askImport();
+        return;
+      }
+
       if (!data || data.ok !== 1) {
         setStatus('err', '同步失败：' + ((data && data.message) || '未知错误'));
         return;
       }
+
       lastPushAt = Number(data.lastPushAt) || 0;
+
+      // 已经是本页面的数据源时，剩下的 foreignRows 只是旧 client 的残留，
+      // 会由"缺席清理"自动消失，不该再问一次要不要导入
+      const ownerIsMe = !!(data.owner && data.owner.mine);
+      if (!ownerIsMe && num(data.foreignRows, 0) > 0 && declinedFor() !== clientId()) {
+        foreignRows = data.foreignRows;
+        blockedOwner = (data.owner && data.owner.host) || '';
+        askImport();
+        return;
+      }
+
       if (data.lastPushOk === false && data.lastError) {
         setStatus('err', '推送异常：' + data.lastError);
       } else {
+        const tail = num(data.foreignRows, 0) > 0
+          ? '（正在清理其它页面的 ' + data.foreignRows + ' 条残留）'
+          : '';
         setStatus('ok', '已同步 ' + data.rows + ' 条 · '
-          + (lastPushAt ? ('最近推送 ' + new Date(lastPushAt).toLocaleTimeString('zh-CN')) : '尚未推送'));
+          + (lastPushAt ? ('最近推送 ' + new Date(lastPushAt).toLocaleTimeString('zh-CN')) : '尚未推送') + tail);
       }
+    }
+
+    function num(v, dflt) {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : dflt;
+    }
+
+    /**
+     * 询问怎么处理 Worker 里已有的旧数据。三选一：
+     *   确定 → 导入旧数据到本页面（换域名时选这个）
+     *   确定后再问 → 用本页面数据替换（会清掉 Worker 上的旧数据）
+     *   取消 → 什么都不做，本页面保持只读（不推数据、也不接管）
+     */
+    function askImport(manual) {
+      if (claiming) return;
+      setStatus('blocked',
+        '此页面还不是通知源' + (blockedOwner ? '（当前：' + blockedOwner + '）' : '')
+        + ' · Worker 里有 ' + foreignRows + ' 条其它页面的数据');
+
+      const head = manual
+        ? '把本页面设为唯一通知源？\n\n'
+        : ('检测到 Worker 里已有另一份数据'
+          + (blockedOwner ? '（来自 ' + blockedOwner + '）' : '')
+          + '，共 ' + foreignRows + ' 条。\n\n');
+
+      const useImport = confirm(
+        head
+        + '【确定】= 导入这份数据到本页面（推荐：换域名时选这个）\n'
+        + '【取消】= 不导入' + (manual ? '（放弃接管）' : '，本页面保持只读')
+      );
+
+      if (!useImport) {
+        // 记住"这次不导入"，避免每 60 秒再问一遍；真正的替换要用户明确选择
+        setDeclined(clientId());
+        readOnly = true;
+        setStatus('ok', '已按只读方式运行 · 需要时点「接管为通知源」 · Worker 上的旧数据会逐步自动清理');
+        return;
+      }
+
+      const useReplace = confirm(
+        '要在导入之前先清掉 Worker 上的旧数据吗？\n\n'
+        + '【取消】= 导入旧数据（推荐）\n'
+        + '【确定】= 不要旧数据，改用本页面的数据替换'
+      );
+      claimAndSync(useReplace ? 'replace' : 'import');
+    }
+
+    /**
+     * 接管为通知源。
+     *   import  → 先把 Worker 的旧数据取回本页面，再接管
+     *   replace → 先接管并清掉旧数据，再用本页面数据同步
+     */
+    function claimAndSync(mode) {
+      if (claiming || !ready()) return;
+      claiming = true;
+      readOnly = false;
+      setStatus('save', mode === 'import' ? '正在导入 Worker 数据…' : '正在替换为本地数据…');
+      setDeclined('');   // 新的选择，清掉旧的"不导入"记忆
+
+      const afterClaim = function () {
+        return fetch(base() + '/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Sync-Token': cfg.token },
+          body: buildPayload()
+        }).then(function (r) { return r.json().then(function (j) { return applyReply(j, r.status); }); });
+      };
+
+      const doClaim = function () {
+        return fetch(base() + '/claim', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Sync-Token': cfg.token },
+          body: JSON.stringify({ clientId: clientId(), clientHost: location.host, mode: mode })
+        }).then(function (r) {
+          return r.json().then(function (j) {
+            if (r.status !== 200 || !j || j.ok !== 1) {
+              throw new Error((j && j.message) || ('接管失败 HTTP ' + r.status));
+            }
+            return j;
+          });
+        });
+      };
+
+      const pull = function () {
+        return fetch(base() + '/snapshot', { headers: { 'X-Sync-Token': cfg.token } })
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (!j || j.ok !== 1) throw new Error((j && j.message) || '导出失败');
+            if (!j.rows || !j.rows.length) return false;
+            // 以 Worker 里的锚点为准写入本页面，刷新后由 render() 正常渲染
+            rows = j.rows.map(function (r) {
+              return {
+                id: String(r.id),
+                name: r.name,
+                account: typeof r.account === 'string' ? r.account : '',
+                region: r.region === 'gudi' ? 'gudi' : 'wuling',
+                prod: Number(r.prod) || 0,
+                cons: Number(r.cons) || 0,
+                stock: Math.max(0, Math.floor(Number(r.stock) || 0)),
+                ts: Number(r.ts) || Date.now(),
+                editing: false
+              };
+            });
+            save();
+            return true;
+          });
+      };
+
+      const flow = mode === 'import'
+        ? pull().then(function (got) {
+            if (!got) setStatus('save', 'Worker 里没有可导入的数据，改用本地数据…');
+            return doClaim().then(function () { return got; });
+          })
+        : doClaim().then(function () { return false; });
+
+      flow.then(function (imported) {
+        if (imported) {
+          location.reload();      // 载入导入的数据，走一遍正常的加载路径
+          return null;
+        }
+        return afterClaim();
+      })
+        .catch(function (e) {
+          setStatus('err', (e && e.message) ? e.message : String(e));
+        })
+        .then(function () { claiming = false; });
     }
 
     function syncNow() {
@@ -1204,13 +1390,15 @@
         setStatus(cfg.on ? 'err' : 'off', cfg.on ? '未填写 Worker 地址或同步令牌' : '未开启 · 数据只保存在本机');
         return Promise.resolve();
       }
+      if (claiming) return Promise.resolve();
+      // 用户选了"不导入"→ 本页面只读，不再推数据（被 409 拒绝也是白跑，还给 Worker 添流量）
+      if (readOnly) return Promise.resolve();
       setStatus('save', '正在同步…');
       return fetch(base() + '/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Sync-Token': cfg.token },
         body: buildPayload()
-      }).then(function (r) { return r.json(); })
-        .then(applyReply)
+      }).then(function (r) { return r.json().then(function (j) { return applyReply(j, r.status); }); })
         .catch(function (e) { setStatus('err', '无法连接 Worker：' + (e && e.message ? e.message : e)); });
     }
 
@@ -1284,6 +1472,13 @@
     nowBtn.addEventListener('click', function () {
       refreshCfg();
       syncNow();
+    });
+
+    /* 接管为通知源：走与自动询问同一套三选一流程 */
+    claimBtn.addEventListener('click', function () {
+      refreshCfg();
+      if (!ready()) { setStatus('err', '请先填写 Worker 地址与同步令牌'); return; }
+      askImport(true);
     });
 
     resetBtn.addEventListener('click', function () {

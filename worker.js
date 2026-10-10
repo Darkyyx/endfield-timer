@@ -213,6 +213,12 @@ export default {
       if (url.pathname === '/test') {
         return await handleTest(env, cfg);
       }
+      if (url.pathname === '/claim') {
+        return await handleClaim(request, env, cfg);
+      }
+      if (url.pathname === '/snapshot') {
+        return await handleSnapshot(request, env, cfg);
+      }
       if (url.pathname === '/reset-alerts') {
         return await handleResetAlerts(request, env, cfg);
       }
@@ -288,6 +294,28 @@ async function handleSync(request, env, cfg) {
   const seen = Object.create(null);
   let written = 0;
 
+  /* ---- 数据源归属：同一份 Worker 状态只接受一个 clientId 覆盖 ---- */
+  const clientId = String((body && body.clientId) || '').slice(0, 64);
+  const clientHost = String((body && body.clientHost) || '').slice(0, 120);
+  const force = !!(body && body.force);
+  let owner = (await env.STATE.get('meta:owner', 'json')) || null;
+
+  if (owner && owner.clientId && clientId && owner.clientId !== clientId && !force) {
+    // 不覆盖别人的数据，把情况告诉页面，由你来决定导入还是替换
+    return json({
+      ok: 0,
+      code: 'owner_mismatch',
+      message: '另一个页面正在作为通知源',
+      owner: { host: owner.host || '', since: owner.since || 0 },
+      rows: await countRows(env)
+    }, 409);
+  }
+
+  if (clientId && (!owner || owner.clientId !== clientId)) {
+    owner = { clientId: clientId, host: clientHost, since: Date.now() };
+    await env.STATE.put('meta:owner', JSON.stringify(owner));
+  }
+
   // 前端设置面板里的"预警提前量"以这里为准，避免两处配置打架
   const warnMinutes = num(body && body.warnMinutes);
   if (warnMinutes > 0) {
@@ -306,11 +334,13 @@ async function handleSync(request, env, cfg) {
     const next = {
       id: raw.id,
       name: typeof raw.name === 'string' ? raw.name : String(prev.name || ''),
+      account: typeof raw.account === 'string' ? raw.account : String(prev.account || ''),
       region: CAPS[raw.region] ? raw.region : 'wuling',
       prod: Math.max(0, num(raw.prod)),
       cons: Math.max(0, num(raw.cons)),
       stock: Math.max(0, Math.floor(num(raw.stock))),
       ts: num(raw.ts) || Date.now(),
+      client: clientId || String(prev.client || ''),
       // 保留 Worker 自己的提醒水位，不因前端同步而丢
       alerted: num(prev.alerted),
       lastAttemptAt: num(prev.lastAttemptAt),
@@ -322,13 +352,15 @@ async function handleSync(request, env, cfg) {
     written++;
   }
 
-  // 前端已删除的行：连续缺席若干次后清理
+  // 不是本 client 留下的行也要计入"缺席"，这样换域名后残留数据会被逐步清掉
+  let foreignRows = 0;
   let removed = 0;
   const list = await env.STATE.list({ prefix: 'row:' });
   for (const k of list.keys) {
-    const id = k.name.slice(4);
-    if (seen[id]) continue;
     const prev = (await env.STATE.get(k.name, 'json')) || {};
+    const foreign = !!clientId && String(prev.client || '') !== clientId;
+    if (foreign) foreignRows++;
+    if (seen[k.name.slice(4)]) continue;
     const misses = num(prev.misses) + 1;
     if (misses >= cfg.DELETE_AFTER_MISSES) {
       await env.STATE.delete(k.name);
@@ -344,10 +376,103 @@ async function handleSync(request, env, cfg) {
     ok: 1,
     rows: written,
     removed: removed,
+    foreignRows: foreignRows,          // 属于别的页面的残留行数量，>0 时前端会问你要不要导入
+    owner: owner && owner.clientId
+      ? { host: owner.host || '', mine: owner.clientId === clientId }
+      : null,
     lastPushAt: last.lastPushAt || 0,
     lastPushOk: last.lastPushOk !== false,
     lastError: last.lastError || null,
     lastPushCode: last.lastPushCode == null ? null : last.lastPushCode
+  });
+}
+
+/* ================= 数据源归属：/claim 与 /snapshot ================= */
+
+async function countRows(env) {
+  if (!env || !env.STATE) return 0;
+  const list = await env.STATE.list({ prefix: 'row:' });
+  return list.keys.length;
+}
+
+function readClaimToken(request, url) {
+  const h = request.headers.get('X-Claim-Token');
+  if (h) return h;
+  return url.searchParams.get('token') || '';
+}
+
+/**
+ * 接管为通知源。换域名 / 换电脑时，由新页面点一下完成；旧所有者下次同步会收到 409 转为只读。
+ *   mode = import  → 保留 Worker 现有数据（换域名时把旧数据接过来）
+ *   mode = replace → 清掉旧数据，改用本页面自己的数据
+ * 若配置了 CLAIM_TOKEN，则必须带上才允许接管。
+ */
+async function handleClaim(request, env, cfg) {
+  if (request.method !== 'POST') return json({ ok: 0, message: 'use POST' }, 405);
+  if (!env || !env.STATE) return json({ ok: 0, message: '未绑定 KV 命名空间 STATE' }, 500);
+
+  const url = new URL(request.url);
+  const expect = env.CLAIM_TOKEN;
+  if (expect && readClaimToken(request, url) !== expect) {
+    return json({ ok: 0, message: '接管令牌错误（CLAIM_TOKEN）' }, 401);
+  }
+
+  let body = {};
+  try { body = (await request.json()) || {}; } catch (e) { /* 允许空 body */ }
+
+  const clientId = String(body.clientId || '').slice(0, 64);
+  const host = String(body.clientHost || '').slice(0, 120);
+  const mode = body.mode === 'replace' ? 'replace' : 'import';
+
+  if (!clientId) return json({ ok: 0, message: '缺少 clientId' }, 400);
+
+  let removed = 0;
+  if (mode === 'replace') {
+    // 旧页面的数据整批清掉，避免残留行继续按旧数据发通知
+    const list = await env.STATE.list({ prefix: 'row:' });
+    for (const k of list.keys) {
+      const row = await env.STATE.get(k.name, 'json');
+      if (row && String(row.client || '') === clientId) continue;
+      await env.STATE.delete(k.name);
+      removed++;
+    }
+  }
+
+  await env.STATE.put('meta:owner', JSON.stringify({
+    clientId: clientId, host: host, since: Date.now()
+  }));
+
+  return json({ ok: 1, mode: mode, removed: removed, rows: await countRows(env) });
+}
+
+/** 导出 Worker 现有数据，供新页面导入（必须持有同步令牌） */
+async function handleSnapshot(request, env, cfg) {
+  if (!env || !env.STATE) return json({ ok: 0, message: '未绑定 KV 命名空间 STATE' }, 500);
+  if (!checkToken(request, env)) return json({ ok: 0, message: '令牌错误' }, 401);
+
+  const now = Date.now();
+  const out = [];
+  const list = await env.STATE.list({ prefix: 'row:' });
+  for (const k of list.keys) {
+    const row = await env.STATE.get(k.name, 'json');
+    if (!row) continue;
+    out.push({
+      id: row.id,
+      name: row.name,
+      account: row.account || '',
+      region: CAPS[row.region] ? row.region : 'wuling',
+      prod: num(row.prod),
+      cons: num(row.cons),
+      stock: Math.max(0, Math.floor(num(row.stock))),
+      ts: num(row.ts) || now
+    });
+  }
+
+  const owner = (await env.STATE.get('meta:owner', 'json')) || null;
+  return json({
+    ok: 1,
+    rows: out,
+    owner: owner ? { host: owner.host || '', since: owner.since || 0 } : null
   });
 }
 
@@ -367,6 +492,7 @@ async function handleState(request, env, cfg) {
     out.push({
       id: row.id,
       name: row.name,
+      account: row.account || '',
       region: row.region,
       alerted: num(row.alerted),
       misses: num(row.misses),

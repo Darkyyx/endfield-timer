@@ -48,6 +48,7 @@
    | `SC_SENDKEY` | Secret | Server酱³ 的 SendKey（UID 会自动从里面解析） |
    | `SYNC_TOKEN` | Secret | 自己随便生成一串随机字符串，防止别人往你的 Worker 灌假数据 |
    | `SC_UID` | Secret（**可选**） | 仅当 SendKey 不以 `sctp` 开头时才需要手动指定 |
+   | `CLAIM_TOKEN` | Secret（**可选**） | 强制夺回通知源用的口令（旧页面已打不开时用），不配则接管无需令牌 |
    | `WARN_SECONDS` | 可选 | 兜底预警窗口秒数，默认 `1800`（30 分钟）。**页面设置面板里的值会覆盖它** |
 
 5. 添加定时触发器（Settings → Triggers → Cron）：**`*/5 * * * *`**（每 5 分钟）。
@@ -69,10 +70,36 @@
 - 想重新接收已经提醒过的产线：点面板里的「**重置已提醒标记**」。
 - 只走 App 通道：代码固定不传 `channel`，走 Server酱 默认通道。
 
+### 换域名 / 换电脑 / 多页面同时开着
+
+同一个 Worker 只能有一个「通知源」。页面第一次同步时会自动认领；**另一个页面再同步会被拒绝（不会覆盖数据）**，并弹窗问你：
+
+| 选择 | 结果 |
+|---|---|
+| **确定** → 导入 | 把 Worker 上的旧数据（含备注列与时间锚点）取回本页面，本页面接管为通知源。**换域名时选这个** |
+| 确定后再确定 | 丢弃 Worker 上的旧数据，改用本页面数据替换 |
+| **取消** | 什么都不做，本页面进入**只读**：不推数据、也不接管。随时可点「接管为通知源」改主意 |
+
+选「取消」后不会每 60 秒重复追问；Worker 上属于旧页面的残留行会被新通知源逐步自动清理。
+
+**换域名时的正确姿势**：在新域名页面填好 Worker 地址与令牌、勾选开启通知 → 弹窗点「确定」导入 → 页面自动刷新，产线和备注都回来了。旧域名那页不用管，它下次同步会自动转为只读。
+
+若想强制夺回（旧页面已经打不开），给 Worker 配一个 `CLAIM_TOKEN` 环境变量，然后：
+
+```bash
+curl -X POST "https://<你的 Worker>/claim?token=<CLAIM_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d "{\"clientId\":\"manual\",\"clientHost\":\"manual\",\"mode\":\"import\"}"
+```
+
+> `mode` 用 `import` 保留数据，用 `replace` 清掉旧数据。
+
 ### 自检与排错
 
 - `GET https://<你的 Worker>/test` — 触发一条测试推送，返回接口原始结果与所用地址模板。
 - `GET https://<你的 Worker>/state` — 查看 Worker 掌握的行、等级与已提醒水位（需带 `X-Sync-Token` 头）。
+- `GET https://<你的 Worker>/snapshot` — 导出 Worker 上的完整数据（页面导入用的就是这个）。
+- `POST https://<你的 Worker>/claim` — 接管为通知源（见上一节）。
 - `POST https://<你的 Worker>/reset-alerts` — 清空全部「已提醒」标记。
 - 页面状态灯显示**推送异常**时，消息区会显示 Server酱 返回的原始错误（如 Key 失效、额度用尽）。
 - 常见提示对照：
@@ -81,13 +108,14 @@
   - `未绑定 KV 命名空间 STATE` — KV 绑定的变量名写错了，必须一字不差是 `STATE`。
 - **测试通知能收到、但从不自动预警** → 多半是 Cron Trigger 没加。
 
-### 本地跑 Worker 自测
+### 本地跑自测
 
 ```bash
-node worker.test.mjs
+node worker.test.mjs         # 87 项：等级判定、去抖、聚合消息、推送重试、SendKey 解析 UID、鉴权
+node worker.owner.test.mjs   # 19 项：数据源归属、换域名导入流程、只读态
 ```
 
-覆盖等级判定、一次性去抖（含「爆仓后挂 6 小时不重推」）、聚合消息、推送失败重试、SendKey 解析 UID、`/sync` 鉴权与缺行清理等 87 项断言，不需要任何依赖。
+两个脚本都不需要任何依赖。
 
 ---
 
