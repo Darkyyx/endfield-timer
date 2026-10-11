@@ -542,7 +542,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.4.0</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.5.0</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -566,6 +566,9 @@
 
   /* 通知模块：在文件后段赋值（paintStats 会在启动阶段先跑到，所以这里必须提前声明） */
   let notify = null;
+  /* 自上次同步以来本地数据是否被改过。false 时前端只做"心跳"，Worker 不写任何键 —— 
+     KV 免费版每天只有 1000 次写，靠这个把消耗压低一个数量级。 */
+  var dataDirty = true;
 
   /* ================= 物品列表（来自 items.js） ================= */
   const FALLBACK_ITEMS = ['源石碎片', '碳素结晶', '精密零件'];
@@ -672,6 +675,7 @@
   }
 
   function save() {
+    dataDirty = true;      // 有任何改动，下次同步就必须把数据推上去
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(rows));
       if (migratedFromLegacy) {
@@ -1098,7 +1102,8 @@
     const CFG_KEY = 'endfield_notify_v1';
     const CLIENT_KEY = 'endfield_client_v1';       // 本 origin 的身份，用于区分"哪个页面是通知源"
     const DECLINE_KEY = 'endfield_import_declined'; // 记下"这次不导入"，避免每 60 秒反复问
-    const HEARTBEAT = 60000;
+    const CLAIM_TS_KEY = 'endfield_claim_at';       // 最近一次接管的时间
+    const CLAIM_QUIET_MS = 10 * 60 * 1000;          // 接管后这段时间内不再追问导入
 
     const $ = function (id) { return document.getElementById(id); };
     const urlEl = $('ntUrl');
@@ -1121,6 +1126,7 @@
     let wasEditing = false;
     let blockedOwner = '';    // 当前占着 Worker 的那个页面
     let foreignRows = 0;      // Worker 里属于别的页面的残留行数
+    let claimedAt = 0;        // 本页面最近一次接管的时间
     let readOnly = false;     // 用户选了"不导入"，本页面保持只读
     let claiming = false;
 
@@ -1168,6 +1174,13 @@
     }
     function setDeclined(v) {
       try { v ? localStorage.setItem(DECLINE_KEY, v) : localStorage.removeItem(DECLINE_KEY); } catch (e) { /* 忽略 */ }
+    }
+
+    function readClaimTs() {
+      try { return Number(localStorage.getItem(CLAIM_TS_KEY)) || 0; } catch (e) { return 0; }
+    }
+    function markClaimed() {
+      try { localStorage.setItem(CLAIM_TS_KEY, String(Date.now())); } catch (e) { /* 忽略 */ }
     }
 
     let cfg = loadCfg();
@@ -1237,6 +1250,7 @@
         clientId: clientId(),
         clientHost: location.host,
         clientTs: t,
+        dirty: dataDirty,
         warnMinutes: cfg.warn,
         alertTypes: alertTypes(),
         rows: list
@@ -1269,13 +1283,15 @@
         return;
       }
 
+      dataDirty = false;    // 本轮数据已经交给 Worker，接下来只发心跳
       lastPushAt = Number(data.lastPushAt) || 0;
 
-      // 已经是本页面的数据源时，剩下的 foreignRows 只是旧 client 的残留，
-      // 会由"缺席清理"自动消失，不该再问一次要不要导入
-      const ownerIsMe = !!(data.owner && data.owner.mine);
-      if (!ownerIsMe && num(data.foreignRows, 0) > 0 && declinedFor() !== clientId()) {
-        foreignRows = data.foreignRows;
+      // 刚接管完的那段时间里，KV 里还留着旧 client 的行（要缺席两轮才清掉）。
+      // 那不是"新发现的旧数据"，不该再问一次，否则接管成功后会立刻被重复追问。
+      const foreign = num(data.foreignRows, 0);
+      const claimingRecently = Date.now() - num(claimedAt, 0) < CLAIM_QUIET_MS;
+      if (foreign > 0 && !claimingRecently && !readOnly && declinedFor() !== clientId()) {
+        foreignRows = foreign;
         blockedOwner = (data.owner && data.owner.host) || '';
         askImport();
         return;
@@ -1284,8 +1300,10 @@
       if (data.lastPushOk === false && data.lastError) {
         setStatus('err', '推送异常：' + data.lastError);
       } else {
-        const tail = num(data.foreignRows, 0) > 0
-          ? '（正在清理其它页面的 ' + data.foreignRows + ' 条残留）'
+        const tail = foreign > 0
+          ? (claimingRecently
+            ? '（正在清理 ' + foreign + ' 条旧数据）'
+            : '（另有 ' + foreign + ' 条别处数据待接管）')
           : '';
         setStatus('ok', '已同步 ' + data.rows + ' 条 · '
           + (lastPushAt ? ('最近推送 ' + new Date(lastPushAt).toLocaleTimeString('zh-CN')) : '尚未推送') + tail);
@@ -1371,6 +1389,8 @@
       if (claiming || !ready()) return;
       claiming = true;
       readOnly = false;
+      claimedAt = Date.now();
+      markClaimed();     // 接管后一段时间内不再追问导入
       setStatus('save', mode === 'import' ? '正在导入 Worker 数据…' : '正在替换为本地数据…');
       setDeclined('');   // 新的选择，清掉旧的"不导入"记忆
 
@@ -1448,13 +1468,13 @@
         return Promise.resolve();
       }
       if (claiming) return Promise.resolve();
-      // 用户选了"不导入"→ 本页面只读，不再推数据（被 409 拒绝也是白跑，还给 Worker 添流量）
-      if (readOnly) return Promise.resolve();
+      if (readOnly) return Promise.resolve();   // 用户选了"不导入"：本页面完全不动 Worker
+      const heartbeat = !dataDirty;             // dirty=false 时 Worker 一个键都不写
       setStatus('save', '正在同步…');
       return fetch(base() + '/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Sync-Token': cfg.token },
-        body: buildPayload()
+        body: buildPayload({ dirty: heartbeat ? false : true })
       }).then(function (r) { return readJson(r).then(function (j) { return applyReply(j, r.status); }); })
         .catch(function (e) { setStatus('err', '无法连接 Worker：' + (e && e.message ? e.message : e)); });
     }
@@ -1466,10 +1486,11 @@
     }
 
     function beacon() {
-      if (!enabled() || !navigator.sendBeacon) return;
+      // 只有"确实有未同步的改动"时才在离开页面时补推；只读状态完全不碰 Worker
+      if (!enabled() || readOnly || !dataDirty || !navigator.sendBeacon) return;
       try {
         navigator.sendBeacon(base() + '/sync',
-          new Blob([buildPayload()], { type: 'application/json' }));
+          new Blob([buildPayload({ dirty: true })], { type: 'application/json' }));
       } catch (e) { /* 忽略 */ }
     }
 
@@ -1563,6 +1584,7 @@
     tokenEl.value = cfg.token;
     warnEl.value = String(cfg.warn);
     onEl.checked = cfg.on;
+    claimedAt = readClaimTs();
     fullEl.checked = cfg.warnFull;
     emptyEl.checked = cfg.warnEmpty;
     setStatus(
@@ -1570,11 +1592,13 @@
       cfg.on ? (ready() ? '等待首次同步…' : '未填写 Worker 地址或同步令牌') : '未开启 · 数据只保存在本机'
     );
 
-    setInterval(function () { if (enabled() && !wasEditing) syncNow(); }, HEARTBEAT);
+    // 没有心跳定时器：挂机时不发任何请求。
+    // 同步只在这些时刻发生：进入页面（仅当确有数据且未只读时一次）、
+    // 确认修改退出编辑态、改动通知设置、点了「立即同步 / 接管 / 测试」。
+    // 进入页面时补一次：让新页面认领数据源、并发现"Worker 上有别人的数据"。
+    // 只读、或本地本来就没有数据（纯新建）时不发，避免制造上面那种空快照事故。
+    if (enabled() && !readOnly && rows.length) scheduleSync(1500);
 
-    document.addEventListener('visibilitychange', function () {
-      if (!document.hidden) { refreshCfg(); scheduleSync(300); }
-    });
     window.addEventListener('pagehide', beacon);
 
     return {

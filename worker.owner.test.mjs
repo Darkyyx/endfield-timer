@@ -86,12 +86,18 @@ await check('claim mode=import → 接管但保留旧数据', async () => {
   return 'owner → new.example，旧数据保留';
 });
 
-await check('接管后，新页面同步成功且 foreignRows 归零', async () => {
+await check('接管后新页面同步成功；旧 client 的行如实汇报为 foreignRows 并很快归零', async () => {
   const res = await worker.fetch(req('/sync', rowPayload('cB', { clientHost: 'new.example' })), ENV, {});
   const j = await res.json();
   assert(res.status === 200 && j.ok === 1, '接管后仍被拒：' + JSON.stringify(j));
-  assert(j.foreignRows === 0, 'foreignRows = ' + j.foreignRows);
-  return 'ok，foreignRows = 0';
+  // 接管刚完成时 KV 里那行的 client 还是 cA，所以如实汇报为 1 条；
+  // 页面侧靠"刚接管"标记避免追问（见前端 CLAIM_QUIET_MS）
+  assert(j.foreignRows === 1, 'foreignRows = ' + j.foreignRows + '（应如实汇报 1 条待清理）');
+
+  const res2 = await worker.fetch(req('/sync', rowPayload('cB', { clientHost: 'new.example' })), ENV, {});
+  const j2 = await res2.json();
+  assert(j2.foreignRows === 0, '下一轮 foreignRows = ' + j2.foreignRows);
+  return '如实汇报 1 → 下一轮归零';
 });
 
 await check('旧页面同步 → 现在轮到它被拒（自动转为只读）', async () => {
@@ -205,6 +211,7 @@ let replaceAsked = 0;
 /* 按阶段答复询问，便于在流程进行中观察状态 */
 const stubConfirm = function (msg) {
   const m = String(msg);
+
   if (m.indexOf('要在导入之前') >= 0) {
     replaceAsked++;
     return phase === 'replace';       // 第二次询问：是否改用本地数据替换
@@ -276,13 +283,13 @@ await check('点"立即同步" → 弹出询问，选"不导入"后进入只读'
   return msg;
 });
 
-await check('只读状态下不再向 Worker 发同步请求', async () => {
+await check('只读状态下任何触发都不向 Worker 发请求（挂机也不轮询）', async () => {
   calls.length = 0;
   els.ntNow.listeners.click.forEach(fn => fn());
-  await new Promise(r => setTimeout(r, 60));
+  await new Promise(r => setTimeout(r, 1200));   // 覆盖启动同步的延时窗口
   const syncs = calls.filter(c => c.url.endsWith('/sync')).length;
   assert(syncs === 0, '只读时仍发起了 ' + syncs + ' 次 /sync');
-  return '未发起 /sync（等待用户明确接管）';
+  return '未发起任何请求（等待用户明确接管）';
 });
 
 await check('点"接管为通知源" → 重新弹出询问', async () => {
@@ -327,7 +334,8 @@ await check('选"替换"时走 replace 模式（不再重复弹第二次询问�
   calls.length = 0;
   phase = 'replace';
   store.delete('endfield_import_declined');
-  els.ntNow.listeners.click.forEach(fn => fn());
+  store.delete('endfield_claim_at');   // 清掉"刚接管"抑制，否则不会弹询问
+  els.ntClaim.listeners.click.forEach(fn => fn());   // 只读态下用接管按钮驱动
   await new Promise(r => setTimeout(r, 80));
   const claim = calls.find(c => c.url.endsWith('/claim'));
   assert(claim, '未发起 /claim：' + calls.map(c => c.url).join(','));
@@ -337,23 +345,27 @@ await check('选"替换"时走 replace 模式（不再重复弹第二次询问�
   return 'mode = replace → 直接 /sync';
 });
 
-await check('选择"不导入"时记住决定，不会每次同步都追问', async () => {
+await check('选择"不导入"后：记住决定，后续自动同步不会再追问', async () => {
   phase = 'decline';
+  store.delete('endfield_claim_at');
   const before = importAsked;
-  els.ntNow.listeners.click.forEach(fn => fn());
+  els.ntClaim.listeners.click.forEach(fn => fn());
   await new Promise(r => setTimeout(r, 60));
   assert(importAsked === before + 1, '未弹出询问（断言前提不成立）');
 
-  // 再次同步：不应再问
-  const after = importAsked;
-  els.ntNow.listeners.click.forEach(fn => fn());
-  await new Promise(r => setTimeout(r, 60));
-  assert(importAsked === after, '又追问了一次，说明"不导入"没被记住');
-
   const decl = store.get('endfield_import_declined');
   const cid = store.get('endfield_client_v1');
-  assert(decl && decl === cid, '记住的 clientId 不对：' + decl + ' vs ' + cid);
-  return '已记录并且不再追问';
+  assert(decl && decl === cid, '没有记住"不导入"的决定：' + decl + ' vs ' + cid);
+
+  // 之后任何同步触发都不该再弹询问
+  const after = importAsked;
+  els.ntNow.listeners.click.forEach(fn => fn());
+  await new Promise(r => setTimeout(r, 1000));
+  assert(importAsked === after, '又追问了 ' + (importAsked - after) + ' 次');
+
+  const msg = String(getEl('ntMsg').textContent);
+  assert(/只读/.test(msg), '应停留在只读提示：' + msg);
+  return '已记录决定，不再追问 · ' + msg.slice(0, 24) + '…';
 });
 
 console.log('\n结果：' + (failed === 0 ? '全部通过' : failed + ' 项失败'));

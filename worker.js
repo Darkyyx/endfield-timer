@@ -233,7 +233,13 @@ export default {
       }
       return json({ ok: 0, message: 'not found' }, 404);
     } catch (err) {
-      return json({ ok: 0, message: String(err && err.message || err) }, 500);
+      const msg = String(err && err.message || err);
+      // 兜底：任何没被 safePut/safeDelete 拦住的可恢复错误（如 KV 额度耗尽）
+      // 都换成可读信息，而不是把英文异常丢给页面
+      if (QUOTA_RE.test(msg)) {
+        return json({ ok: 0, quota: 1, message: QUOTA_MSG }, 503);
+      }
+      return json({ ok: 0, message: msg }, 500);
     }
   },
 
@@ -291,6 +297,64 @@ async function effectiveConfig(env, cfg) {
   };
 }
 
+/**
+ * 批量写入。入参是 { key, value } 数组。
+ *
+ * 注意 Cloudflare KV 的额度按「写操作次数」计费，不是按字节也不是按键数，
+ * 所以这里必须逐个键调用 put(k, v)，并靠"只在真正有变更时才写"来省额度 —— 
+ * 不能把数组当作值传给 put()（那是把数组本身当成一个 value 存进某个键）。
+ * 另外把"配额耗尽"这类可恢复错误换成可读信息，而不是让页面显示一串英文异常。
+ */
+const QUOTA_RE = /limit exceeded|quota|429|daily/i;
+const QUOTA_MSG = 'KV 每日写入额度已用尽（免费版 1000 次/天），明天会恢复';
+
+async function safePut(env, pairs) {
+  const list = (pairs || []).filter(function (p) { return p && p.key; });
+  if (!list.length) return { ok: true, count: 0 };
+  try {
+    for (const p of list) await env.STATE.put(p.key, p.value);
+    return { ok: true, count: list.length };
+  } catch (err) {
+    const msg = String((err && err.message) || err);
+    if (QUOTA_RE.test(msg)) {
+      return { ok: false, quota: true, message: QUOTA_MSG };
+    }
+    throw err;
+  }
+}
+
+async function safeDelete(env, keys) {
+  const list = (keys || []).filter(Boolean);
+  if (!list.length) return { ok: true, count: 0 };
+  try {
+    for (const k of list) await env.STATE.delete(k);
+    return { ok: true, count: list.length };
+  } catch (err) {
+    const msg = String((err && err.message) || err);
+    if (QUOTA_RE.test(msg)) {
+      return { ok: false, quota: true, message: QUOTA_MSG };
+    }
+    throw err;
+  }
+}
+
+/**
+ * 判断这一行是否有实质变化。没变就不写 —— KV 按写次数计费，
+ * 一次同步里绝大多数行其实都跟上次一样，跳过它们才是省额度的关键。
+ * 只比对页面负责的字段，Worker 自己的状态（alerted / lastError / misses）不算。
+ */
+function sameRow(prev, next) {
+  if (!prev || !prev.id) return false;
+  return prev.name === next.name
+    && String(prev.remark || '') === String(next.remark || '')
+    && prev.region === next.region
+    && num(prev.prod) === next.prod
+    && num(prev.cons) === next.cons
+    && Math.floor(num(prev.stock)) === next.stock
+    && num(prev.ts) === next.ts
+    && String(prev.client || '') === String(next.client || '');
+}
+
 /* ================= /sync ================= */
 
 async function handleSync(request, env, cfg) {
@@ -307,6 +371,7 @@ async function handleSync(request, env, cfg) {
 
   const incoming = Array.isArray(body && body.rows) ? body.rows.slice(0, cfg.MAX_ROWS) : [];
   const seen = Object.create(null);
+  const rowPuts = [];
   let written = 0;
 
   /* ---- 数据源归属：同一份 Worker 状态只接受一个 clientId 覆盖 ---- */
@@ -328,7 +393,10 @@ async function handleSync(request, env, cfg) {
 
   if (clientId && (!owner || owner.clientId !== clientId)) {
     owner = { clientId: clientId, host: clientHost, since: Date.now() };
-    await env.STATE.put('meta:owner', JSON.stringify(owner));
+    const ownRes = await safePut(env, [{ key: 'meta:owner', value: JSON.stringify(owner) }]);
+    if (ownRes.quota) {
+      return json({ ok: 0, quota: 1, message: ownRes.message }, 503);
+    }
   }
 
   // 前端设置面板里的"预警提前量"与"提醒方向"以这里为准，避免两处配置打架
@@ -340,13 +408,23 @@ async function handleSync(request, env, cfg) {
       warnMinutes: warnMinutes > 0 ? Math.min(720, warnMinutes) : num(prev.warnMinutes) || 30,
       alertTypes: at
         ? { full: at.full !== false, empty: at.empty !== false }
-        : (prev.alertTypes || { full: true, empty: true }),
-      updatedAt: Date.now()
+        : (prev.alertTypes || { full: true, empty: true })
     };
-    await env.STATE.put('meta:config', JSON.stringify(next));
+    // 只有真的变了才写，避免每次心跳都消耗一次写入额度
+    if (next.warnMinutes !== num(prev.warnMinutes)
+      || !prev.alertTypes
+      || next.alertTypes.full !== prev.alertTypes.full
+      || next.alertTypes.empty !== prev.alertTypes.empty) {
+      next.updatedAt = Date.now();
+      await safePut(env, [{ key: 'meta:config', value: JSON.stringify(next) }]);
+    }
   }
 
-  for (let i = 0; i < incoming.length; i++) {
+  // dirty 为 false 表示页面自上次同步以来没有任何改动 —— 此时一个字节都不写。
+  // 页面的倒计时靠自个儿的锚点算，Worker 也按同一锚点外推，所以没必要反复推同样的数据。
+  const dirty = body && body.dirty === false ? false : true;
+
+  for (let i = 0; dirty && i < incoming.length; i++) {
     const raw = incoming[i];
     if (!raw || typeof raw.id !== 'string' || !raw.id) continue;
 
@@ -369,43 +447,65 @@ async function handleSync(request, env, cfg) {
       misses: 0,
       updatedAt: Date.now()
     };
-    await env.STATE.put('row:' + raw.id, JSON.stringify(next));
+    if (!sameRow(prev, next)) {                 // 内容没变就不写，省下这一次额度
+      rowPuts.push({ key: 'row:' + raw.id, value: JSON.stringify(next) });
+    }
     written++;
   }
 
   // 不是本 client 留下的行也要计入"缺席"，这样换域名后残留数据会被逐步清掉
   let foreignRows = 0;
   let removed = 0;
+  let lastPushAt = 0;
+  let lastPushOk = true;
+  let lastError = null;
+  const missPuts = [];
+  const delKeys = [];
   const list = await env.STATE.list({ prefix: 'row:' });
   for (const k of list.keys) {
     const prev = (await env.STATE.get(k.name, 'json')) || {};
+    const id = k.name.slice(4);
+    // 如实汇报：KV 里有多少行不属于本页面（含换域名后的残留）。
+    // "刚接管完要不要再问一次"是页面的判断，不在这里替它决定。
     const foreign = !!clientId && String(prev.client || '') !== clientId;
     if (foreign) foreignRows++;
-    if (seen[k.name.slice(4)]) continue;
+    if (num(prev.lastPushAt) > lastPushAt) {
+      lastPushAt = num(prev.lastPushAt);
+      lastPushOk = prev.lastError ? false : true;
+      lastError = prev.lastError || null;
+    }
+    // dirty=false 时本轮没有覆盖任何行，缺席计数必须整个跳过，否则会把好数据当残留删掉
+    if (!dirty) continue;
+    if (seen[id]) continue;
     const misses = num(prev.misses) + 1;
     if (misses >= cfg.DELETE_AFTER_MISSES) {
-      await env.STATE.delete(k.name);
+      delKeys.push(k.name);
       removed++;
     } else {
       prev.misses = misses;
-      await env.STATE.put(k.name, JSON.stringify(prev));
+      missPuts.push({ key: k.name, value: JSON.stringify(prev) });
     }
   }
 
-  const last = (await env.STATE.get('meta:status', 'json')) || {};
+  // 无论多少行，一次同步最多只产生 2 次写操作（批量 put + 批量 delete）
+  const putRes = await safePut(env, rowPuts.concat(missPuts));
+  const delRes = await safeDelete(env, delKeys);
+  const quotaHit = putRes.quota || delRes.quota;
+
   return json({
-    ok: 1,
+    ok: quotaHit ? 0 : 1,
+    quota: quotaHit ? 1 : 0,
+    message: quotaHit ? (putRes.message || delRes.message) : undefined,
     rows: written,
     removed: removed,
     foreignRows: foreignRows,          // 属于别的页面的残留行数量，>0 时前端会问你要不要导入
     owner: owner && owner.clientId
       ? { host: owner.host || '', mine: owner.clientId === clientId }
       : null,
-    lastPushAt: last.lastPushAt || 0,
-    lastPushOk: last.lastPushOk !== false,
-    lastError: last.lastError || null,
-    lastPushCode: last.lastPushCode == null ? null : last.lastPushCode
-  });
+    lastPushAt: lastPushAt,
+    lastPushOk: lastPushOk,
+    lastError: lastError
+  }, quotaHit ? 503 : 200);
 }
 
 /* ================= 数据源归属：/claim 与 /snapshot ================= */
@@ -451,17 +551,17 @@ async function handleClaim(request, env, cfg) {
   if (mode === 'replace') {
     // 旧页面的数据整批清掉，避免残留行继续按旧数据发通知
     const list = await env.STATE.list({ prefix: 'row:' });
+    const delKeys = [];
     for (const k of list.keys) {
       const row = await env.STATE.get(k.name, 'json');
       if (row && String(row.client || '') === clientId) continue;
-      await env.STATE.delete(k.name);
+      delKeys.push(k.name);
       removed++;
     }
+    await safeDelete(env, delKeys);   // 一次批量删除，只算一次写
   }
 
-  await env.STATE.put('meta:owner', JSON.stringify({
-    clientId: clientId, host: host, since: Date.now()
-  }));
+  await safePut(env, [{ key: 'meta:owner', value: JSON.stringify({ clientId: clientId, host: host, since: Date.now() }) }]);
 
   return json({ ok: 1, mode: mode, removed: removed, rows: await countRows(env) });
 }
@@ -539,6 +639,7 @@ async function handleResetAlerts(request, env, cfg) {
   } catch (e) { /* 无 body 视为全部重置 */ }
 
   let reset = 0;
+  const puts = [];
   const list = await env.STATE.list({ prefix: 'row:' });
   for (const k of list.keys) {
     const row = await env.STATE.get(k.name, 'json');
@@ -546,38 +647,35 @@ async function handleResetAlerts(request, env, cfg) {
     if (ids && ids.indexOf(row.id) < 0) continue;
     row.alerted = 0;
     row.lastError = null;
-    await env.STATE.put(k.name, JSON.stringify(row));
+    puts.push({ key: k.name, value: JSON.stringify(row) });
     reset++;
   }
-  return json({ ok: 1, reset: reset });
+  const putRes = await safePut(env, puts);
+  return json({
+    ok: putRes.ok ? 1 : 0,
+    quota: putRes.quota ? 1 : 0,
+    message: putRes.quota ? putRes.message : undefined,
+    reset: reset
+  }, putRes.ok ? 200 : 503);
 }
 
 /* ================= /test 与推送 ================= */
 
 async function handleTest(env, cfg) {
-  const now = Date.now();
   const res = await pushServerChan(env, cfg, {
     title: '✅ 终末地通知测试',
     desp: '如果你在 App 里看到这条消息，说明 **Worker → Server酱** 这条链路已经打通。\n\n'
       + '- 推送地址模板：`' + cfg.SC_ENDPOINT + '`\n'
-      + '- 检查时间：' + new Date(now).toISOString(),
+      + '- 检查时间：' + new Date(Date.now()).toISOString(),
     short: '链路自检成功',
     tags: '测试'
   });
-  if (res.ok) await savePushStatus(env, { lastPushAt: now, lastPushOk: true, lastError: null, lastPushCode: res.code });
-  else await savePushStatus(env, { lastPushAt: now, lastPushOk: false, lastError: res.message, lastPushCode: res.code });
   return json({
     ok: res.ok ? 1 : 0,
     code: res.code == null ? null : res.code,
     message: res.message,
     endpoint: cfg.SC_ENDPOINT
   }, res.ok ? 200 : 502);
-}
-
-async function savePushStatus(env, patch) {
-  if (!env || !env.STATE) return;
-  const prev = (await env.STATE.get('meta:status', 'json')) || {};
-  await env.STATE.put('meta:status', JSON.stringify(Object.assign(prev, patch)));
 }
 
 /**
@@ -668,6 +766,7 @@ async function runPatrol(env, cfg) {
 
   const list = await env.STATE.list({ prefix: 'row:' });
   const candidates = [];
+  const writes = [];      // 收集本轮所有要写的行，最后合并成一次批量写
 
   for (const k of list.keys) {
     const row = await env.STATE.get(k.name, 'json');
@@ -680,7 +779,7 @@ async function runPatrol(env, cfg) {
 
     // 状态恢复：静默把水位归零，不推送
     if (decision.action === 'reset') {
-      await env.STATE.put(k.name, JSON.stringify(decision.next));
+      writes.push({ key: k.name, value: JSON.stringify(decision.next) });
       continue;
     }
 
@@ -690,7 +789,10 @@ async function runPatrol(env, cfg) {
     candidates.push({ row: row, key: k.name, level: level });
   }
 
-  if (!candidates.length) return;
+  if (!candidates.length) {
+    await safePut(env, writes);   // 只有状态复位要落盘时，也只是一次写
+    return;
+  }
 
   const items = candidates.map(function (c) {
     return {
@@ -702,13 +804,9 @@ async function runPatrol(env, cfg) {
 
   const msg = composeMessage(items, now);
   const res = await pushServerChan(env, cfg, msg);
-  await savePushStatus(env, {
-    lastPushAt: now,
-    lastPushOk: res.ok,
-    lastError: res.ok ? null : res.message,
-    lastPushCode: res.code == null ? null : res.code
-  });
 
+  // 推送结果只写回待处理的那几行（与上面的复位合并成一次批量写），
+  // 不再额外维护 meta:status，否则免费额度（1000 写/天）很容易被烧光
   for (const c of candidates) {
     if (res.ok) {
       c.row.alerted = c.level;
@@ -717,6 +815,8 @@ async function runPatrol(env, cfg) {
       c.row.lastError = res.message;
     }
     c.row.lastAttemptAt = now;
-    await env.STATE.put(c.key, JSON.stringify(c.row));
+    c.row.lastPushAt = now;
+    writes.push({ key: c.key, value: JSON.stringify(c.row) });
   }
+  await safePut(env, writes);
 }
