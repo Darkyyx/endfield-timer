@@ -445,9 +445,11 @@
 
   .foot{
     margin-top:44px;text-align:center;
-    font-family:var(--mono);font-size:12px;
-    letter-spacing:.3em;color:#31383f;
+    font-family:var(--mono);font-size:12.5px;
+    letter-spacing:.3em;color:#3a424a;
   }
+  /* 中文配超大等宽字距会散，这里单独收一下；版本号用 <b> 恢复常规字距，读起来清楚 */
+  .foot b{font-weight:600;letter-spacing:.06em;color:#4e5860;margin-left:.3em}
 
   @media (max-width:640px){
     body{padding:20px 12px 64px}
@@ -540,7 +542,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">TALOS-II // ENDFIELD INDUSTRY SYSTEM // v1.4.0</div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.4.0</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
