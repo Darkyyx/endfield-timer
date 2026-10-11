@@ -16,7 +16,7 @@
 /* Worker 版本号。页面会拿它和自身版本比对，不一致就提示"该重新部署 Worker 了" —— 
    否则改了 worker.js 却忘了部署，会表现为"功能不生效"且毫无线索。
    发新版时与 index.html 页脚的版本号保持一致。 */
-const WORKER_VERSION = '1.6.2';
+const WORKER_VERSION = '1.6.3';
 
 const DEFAULTS = {
   // 推送到某个产线达到上限/下限前多少秒开始预警
@@ -337,7 +337,7 @@ async function saveQuotaFlag(env, at) {
  */
 const QUOTA_RE = /limit exceeded|quota|429|daily/i;
 // 额度按 UTC 零点重置；换算成 UTC+8 展示，避免用户自己算时差
-const QUOTA_MSG = 'KV 每日写入额度已用尽（免费版 1000 次/天），每日 08:00 时重置';
+const QUOTA_MSG = 'KV 每日写入额度已用尽（免费版 1000 次/天），每天 8:00 点重置';
 
 async function safePut(env, pairs) {
   const list = (pairs || []).filter(function (p) { return p && p.key; });

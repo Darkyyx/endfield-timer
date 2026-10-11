@@ -104,7 +104,7 @@ curl -X POST "https://<你的 Worker>/claim?token=<CLAIM_TOKEN>" \
 - `POST https://<你的 Worker>/claim` — 接管为通知源（见上一节）。
 - `POST https://<你的 Worker>/reset-alerts` — 清空全部「已提醒」标记。
 - 页面状态灯显示**推送异常**时，消息区会显示 Server酱 返回的原始错误（如 Key 失效、额度用尽）。
-- 若显示 `KV 写入额度已用尽`：Cloudflare 免费版每天 1000 次写，用完后新数据推不进 Worker（页面会亮**红灯**）。**每日 08:00 时重置**（北京时间），届时自动恢复。正常使用碰不到：实测挂机 + 每天若干次修改的总写入量接近 0。
+- 若显示 `KV 写入额度已用尽`：Cloudflare 免费版每天 1000 次写，用完后新数据推不进 Worker（页面会亮**红灯**）。**每天 8:00 点重置**（北京时间），届时自动恢复。正常使用碰不到：实测挂机 + 每天若干次修改的总写入量接近 0。
 - 常见提示对照：
   - `未配置 SC_SENDKEY` — 变量没配，或配完没重新 Deploy。
   - `无法从 SendKey 解析 UID` — SendKey 不是 `sctp` 开头的格式，额外配一个 `SC_UID` 即可。

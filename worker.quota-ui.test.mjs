@@ -266,7 +266,7 @@ await check('额度提示里的重置时间按 UTC+8 显示，不再是 UTC', as
   await new Promise(r => setTimeout(r, 60));
   const msg = String(getEl('ntMsg').textContent);
   assert(!/UTC/.test(msg), '文案里仍有 UTC：' + msg);
-  assert(/每日 08:00 时重置/.test(msg), '未按北京时间 08:00 显示：' + msg);
+  assert(/每天 8:00 点重置/.test(msg), '未按北京时间 8:00 显示：' + msg);
   return msg.slice(0, 46) + '…';
 });
 
