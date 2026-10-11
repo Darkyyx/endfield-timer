@@ -542,7 +542,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.5.2</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.5.3</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -556,7 +556,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.5.2';
+  const PAGE_VERSION = '1.5.3';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1189,6 +1189,17 @@
 
     /* KV 额度用尽的状态要跨刷新保留：只读/无改动的请求不写 KV，
        不能因为"这次请求本身成功"就显示绿灯。 */
+    /* 额度重置时间：Cloudflare 按 UTC 零点重置额度，这里换算成北京时间显示 */
+    function quotaResetHint() {
+      if (!quotaAt) return '每天';
+      const d = new Date(quotaAt);
+      d.setUTCHours(24, 0, 0, 0);                 // 下一个 UTC 零点
+      const bj = new Date(d.getTime() + 8 * 3600 * 1000);   // 换算成 UTC+8
+      const p = function (n) { return String(n).padStart(2, '0'); };
+      return '北京时间 ' + p(bj.getUTCMonth() + 1) + '-' + p(bj.getUTCDate())
+        + ' ' + p(bj.getUTCHours()) + ':' + p(bj.getUTCMinutes()) + ' 后';
+    }
+
     function readQuotaAt() {
       try { return Number(localStorage.getItem(QUOTA_TS_KEY)) || 0; } catch (e) { return 0; }
     }
@@ -1314,8 +1325,9 @@
       const qAt = num(data.quota, 0) ? (Number(data.quotaAt) || Date.now()) : Number(data.quotaAt) || 0;
       setQuotaAt(qAt);
       if (quotaAt) {
-        setStatus('err', 'KV 写入额度已用尽（免费版 1000 次/天，UTC 零点重置）· 数据未存入 Worker，'
-          + '本地倒计时不受影响，但手机通知会停');
+        setStatus('err', 'KV 写入额度已用尽（免费版 1000 次/天，' + quotaResetHint()
+          + '重置）· 新数据暂存不进 Worker，本地倒计时照常；'
+          + '手机通知仍会按 Worker 上最后一份快照继续，但数据可能偏旧，且旧快照可能反复触发提醒');
         return;
       }
 
@@ -1631,7 +1643,9 @@
     setStatus(
       quotaAt ? 'err' : (cfg.on ? (ready() ? 'idle' : 'err') : 'off'),
       quotaAt
-        ? 'KV 写入额度已用尽（免费版 1000 次/天，UTC 零点重置）· 数据未存入 Worker，本地倒计时不受影响，但手机通知会停'
+        ? 'KV 写入额度已用尽（免费版 1000 次/天，' + quotaResetHint()
+          + '重置）· 新数据暂存不进 Worker，本地倒计时照常；'
+          + '手机通知仍会按 Worker 上最后一份快照继续，但数据可能偏旧，且旧快照可能反复触发提醒'
         : (cfg.on ? (ready() ? '等待首次同步…' : '未填写 Worker 地址或同步令牌') : '未开启 · 数据只保存在本机')
     );
 

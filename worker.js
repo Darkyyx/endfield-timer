@@ -16,7 +16,7 @@
 /* Worker 版本号。页面会拿它和自身版本比对，不一致就提示"该重新部署 Worker 了" —— 
    否则改了 worker.js 却忘了部署，会表现为"功能不生效"且毫无线索。
    发新版时与 index.html 页脚的版本号保持一致。 */
-const WORKER_VERSION = '1.5.2';
+const WORKER_VERSION = '1.5.3';
 
 const DEFAULTS = {
   // 推送到某个产线达到上限/下限前多少秒开始预警
@@ -42,6 +42,16 @@ const DEFAULTS = {
 
 const CAPS = { gudi: 80000, wuling: 90000 };
 const REGION_LABEL = { gudi: '四号谷地', wuling: '武陵' };
+
+/**
+ * KV 写不进去时的兜底状态（必须在使用它的函数与 __test 之前声明）。
+ *
+ * 额度用尽时，"已提醒水位"和"上次尝试时间"都落不了盘，于是每次巡检都会重新
+ * 认为"等级上升了、该推"→ 每 5 分钟重复推送，既刷屏又烧 Server酱 的推送额度。
+ * quotaCooldown 在 isolate 内存里记一笔挡住重复；pendingWrites 排队等写入恢复后补写。
+ */
+const quotaCooldown = new Map();   // key → 上次推送尝试时间
+const pendingWrites = new Map();   // key → 待补写的行数据
 
 // 等级 1/2 看涨（爆仓方向），3/4 看跌（耗尽方向）
 const LEVEL_META = {
@@ -204,7 +214,8 @@ function describeItem(item, now) {
 /* 仅供本地 worker.test.mjs 调用；Cloudflare 只使用 default 导出，多一个具名导出不影响运行 */
 export const __test = {
   projectStock, evaluateLevel, decideAlert, composeMessage, describeItem,
-  deriveUid, resolveCredentials, effectiveConfig
+  deriveUid, resolveCredentials, effectiveConfig,
+  quotaCooldown, pendingWrites
 };
 
 /* ================= Cloudflare 入口 ================= */
@@ -325,7 +336,8 @@ async function saveQuotaFlag(env, at) {
  * 另外把"配额耗尽"这类可恢复错误换成可读信息，而不是让页面显示一串英文异常。
  */
 const QUOTA_RE = /limit exceeded|quota|429|daily/i;
-const QUOTA_MSG = 'KV 每日写入额度已用尽（免费版 1000 次/天），UTC 零点重置';
+// 额度按 UTC 零点重置；换算成 UTC+8 展示，避免用户自己算时差
+const QUOTA_MSG = 'KV 每日写入额度已用尽（免费版 1000 次/天），北京时间每天 08:00 重置';
 
 async function safePut(env, pairs) {
   const list = (pairs || []).filter(function (p) { return p && p.key; });
@@ -813,6 +825,17 @@ async function pushServerChan(env, cfg, payload) {
 async function runPatrol(env, cfg) {
   if (!env || !env.STATE) return;
 
+  // 先补写上次因额度中断而没落盘的水位；写入恢复正常时它们会一次性归位
+  if (pendingWrites.size) {
+    const retry = [];
+    pendingWrites.forEach(function (value, key) { retry.push({ key: key, value: value }); });
+    const res = await safePut(env, retry);
+    if (!res.quota) {
+      pendingWrites.clear();
+      quotaCooldown.clear();
+    }
+  }
+
   const now = Date.now();
   const { warnSeconds, types } = await effectiveConfig(env, cfg);
   const retryCooldown = num(cfg.PUSH_RETRY_COOLDOWN_MS);
@@ -838,6 +861,8 @@ async function runPatrol(env, cfg) {
 
     // 上次推送失败时，别每 5 分钟就重试一次
     if (row.lastError && now - num(row.lastAttemptAt) < retryCooldown) continue;
+    // 额度中断期间水位落不了盘，用内存冷却挡住重复推送
+    if (now - num(quotaCooldown.get(k.name), 0) < retryCooldown) continue;
 
     candidates.push({ row: row, key: k.name, level: level });
   }
@@ -873,5 +898,17 @@ async function runPatrol(env, cfg) {
     writes.push({ key: c.key, value: JSON.stringify(c.row) });
   }
   const pr = await safePut(env, writes);
-  if (pr.quota) await saveQuotaFlag(env, pr.at);   // 尽力记录，供只读请求如实上报
+  if (pr.quota) {
+    // 水位没落盘：在内存里记下尝试时间挡住重复推送，并排队等写入恢复后补写
+    for (const c of candidates) {
+      quotaCooldown.set(c.key, now);
+      pendingWrites.set(c.key, JSON.stringify(c.row));
+    }
+    await saveQuotaFlag(env, pr.at);   // 尽力记录，供只读请求如实上报
+  } else {
+    for (const c of candidates) {
+      quotaCooldown.delete(c.key);
+      pendingWrites.delete(c.key);
+    }
+  }
 }

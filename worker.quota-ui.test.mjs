@@ -163,7 +163,7 @@ function boot(reply, preStore) {
 
 let confirmValue = true;
 
-const okReply = { ok: 1, worker: '1.5.2', rows: 1, writes: 1, removed: 0, foreignRows: 0, quota: 0, quotaAt: 0, owner: { mine: true }, lastPushAt: 0, lastPushOk: true, lastError: null };
+const okReply = { ok: 1, worker: '1.5.3', rows: 1, writes: 1, removed: 0, foreignRows: 0, quota: 0, quotaAt: 0, owner: { mine: true }, lastPushAt: 0, lastPushOk: true, lastError: null };
 const quotaReply = Object.assign({}, okReply, { quota: 1, quotaAt: 1780000000000, message: 'KV 每日写入额度已用尽（免费版 1000 次/天），UTC 零点重置' });
 
 console.log('\nB. 页面显示');
@@ -184,7 +184,7 @@ await check('消息区说明是 KV 额度问题，并说明本地倒计时不受
   await new Promise(r => setTimeout(r, 60));
   const msg = String(getEl('ntMsg').textContent);
   assert(/额度/.test(msg), '未提示额度：' + msg);
-  assert(/未存入/.test(msg), '未说明数据没存进去：' + msg);
+  assert(/未存入|暂存不进/.test(msg), '未说明数据没存进去：' + msg);
   return msg.slice(0, 40) + '…';
 });
 
@@ -252,7 +252,29 @@ await check('只读状态下手动「立即同步」也会真的发出去（不�
   return '已发出请求（会被 Worker 以 409 告知去向）';
 });
 
-console.log('\nD. Worker 版本一致性');
+console.log('\nD. 重置时间与文案');
+
+await check('额度提示里的重置时间按 UTC+8 显示，不再是 UTC', async () => {
+  const { getEl } = boot(quotaReply);
+  getEl('ntNow').listeners.click.forEach(fn => fn());
+  await new Promise(r => setTimeout(r, 60));
+  const msg = String(getEl('ntMsg').textContent);
+  assert(!/UTC/.test(msg), '文案里仍有 UTC：' + msg);
+  assert(/北京时间/.test(msg), '未按北京时间显示：' + msg);
+  return msg.slice(0, 46) + '…';
+});
+
+await check('不再声称"手机通知会停"（实际仍按最后快照推送）', async () => {
+  const { getEl } = boot(quotaReply);
+  getEl('ntNow').listeners.click.forEach(fn => fn());
+  await new Promise(r => setTimeout(r, 60));
+  const msg = String(getEl('ntMsg').textContent);
+  assert(!/通知会停/.test(msg), '仍在错误地宣称通知会停：' + msg);
+  assert(/最后一份快照/.test(msg), '未说明通知仍会继续：' + msg);
+  return '已改为"仍按最后一份快照继续"';
+});
+
+console.log('\nE. Worker 版本一致性');
 
 await check('Worker 版本与页面不一致 → 红灯并提示重新部署', async () => {
   const stale = Object.assign({}, okReply, { worker: '1.4.0' });
@@ -263,7 +285,7 @@ await check('Worker 版本与页面不一致 → 红灯并提示重新部署', a
   const s = getEl('stats').innerHTML;
   assert(s.includes('通知 异常'), '未亮红灯：' + s.slice(s.indexOf('nstat')));
   assert(/版本不一致/.test(msg), '未提示版本问题：' + msg);
-  assert(/1\.4\.0/.test(msg) && /1\.5\.2/.test(msg), '未列出双方版本：' + msg);
+  assert(/1\.4\.0/.test(msg) && /1.5.3/.test(msg), '未列出双方版本：' + msg);
   return msg.slice(0, 44) + '…';
 });
 
