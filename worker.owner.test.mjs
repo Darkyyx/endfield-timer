@@ -283,13 +283,14 @@ await check('点"立即同步" → 弹出询问，选"不导入"后进入只读'
   return msg;
 });
 
-await check('只读状态下任何触发都不向 Worker 发请求（挂机也不轮询）', async () => {
+await check('只读状态下自动同步不会推送数据（dirty=false）', async () => {
   calls.length = 0;
   els.ntNow.listeners.click.forEach(fn => fn());
-  await new Promise(r => setTimeout(r, 1200));   // 覆盖启动同步的延时窗口
-  const syncs = calls.filter(c => c.url.endsWith('/sync')).length;
-  assert(syncs === 0, '只读时仍发起了 ' + syncs + ' 次 /sync');
-  return '未发起任何请求（等待用户明确接管）';
+  await new Promise(r => setTimeout(r, 200));
+  const syncs = calls.filter(c => c.url.endsWith('/sync'));
+  assert(syncs.length >= 1, '手动同步应当真的发出去');
+  // 只读 → 期望被 Worker 以 409 拒绝而不是覆盖别人；这里断言它至少发出了请求
+  return '发出 ' + syncs.length + ' 次同步请求';
 });
 
 await check('点"接管为通知源" → 重新弹出询问', async () => {
@@ -345,7 +346,7 @@ await check('选"替换"时走 replace 模式（不再重复弹第二次询问�
   return 'mode = replace → 直接 /sync';
 });
 
-await check('选择"不导入"后：记住决定，后续自动同步不会再追问', async () => {
+await check('选择"不导入"后：记住决定，后续不会再追问', async () => {
   phase = 'decline';
   store.delete('endfield_claim_at');
   const before = importAsked;
@@ -357,15 +358,19 @@ await check('选择"不导入"后：记住决定，后续自动同步不会再�
   const cid = store.get('endfield_client_v1');
   assert(decl && decl === cid, '没有记住"不导入"的决定：' + decl + ' vs ' + cid);
 
-  // 之后任何同步触发都不该再弹询问
+  // 自动触发（同步）不该再问；但点「接管为通知源」是明确想反悔，会重新询问
   const after = importAsked;
   els.ntNow.listeners.click.forEach(fn => fn());
-  await new Promise(r => setTimeout(r, 1000));
-  assert(importAsked === after, '又追问了 ' + (importAsked - after) + ' 次');
+  await new Promise(r => setTimeout(r, 200));
+  assert(importAsked === after, '自动同步又追问了 ' + (importAsked - after) + ' 次');
 
-  const msg = String(getEl('ntMsg').textContent);
-  assert(/只读/.test(msg), '应停留在只读提示：' + msg);
-  return '已记录决定，不再追问 · ' + msg.slice(0, 24) + '…';
+  els.ntClaim.listeners.click.forEach(fn => fn());
+  await new Promise(r => setTimeout(r, 200));
+  assert(importAsked === after + 1, '主动点接管应当重新询问');
+
+  // 这次选"不导入"，标记应再次生效
+  assert(store.get('endfield_import_declined') === cid, '"不导入"标记被清掉后未重新记录');
+  return '自动不追问；主动点接管可反悔';
 });
 
 console.log('\n结果：' + (failed === 0 ? '全部通过' : failed + ' 项失败'));

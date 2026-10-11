@@ -542,7 +542,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.5.1</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.5.2</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -1276,7 +1276,7 @@
       return { full: !!cfg.warnFull, empty: !!cfg.warnEmpty };
     }
 
-    function applyReply(data, httpStatus) {
+    function applyReply(data, httpStatus, forced) {
       // Worker 返回了非 JSON（多为 Cloudflare 错误页）：把状态码和响应片段直接显示出来
       if (data && data.__nonJson) {
         setStatus('err', 'Worker 返回了非 JSON 响应 · ' + data.message);
@@ -1326,7 +1326,7 @@
           ? (claimingRecently
             ? '（正在清理 ' + foreign + ' 条旧数据）'
             : '（另有 ' + foreign + ' 条别处数据待接管）')
-          : (!dataDirty && !readOnly && num(data.writes, 0) === 0 ? '（无改动，未写入）' : '');
+          : (num(data.writes, 0) === 0 && !forced ? '（无改动，未写入）' : '');
         setStatus('ok', '已同步 ' + data.rows + ' 条 · '
           + (lastPushAt ? ('最近推送 ' + new Date(lastPushAt).toLocaleTimeString('zh-CN')) : '尚未推送') + tail);
       }
@@ -1484,27 +1484,31 @@
         .then(function () { claiming = false; });
     }
 
-    function syncNow() {
+    function syncNow(force) {
       if (!enabled()) {
         setStatus(cfg.on ? 'err' : 'off', cfg.on ? '未填写 Worker 地址或同步令牌' : '未开启 · 数据只保存在本机');
         return Promise.resolve();
       }
       if (claiming) return Promise.resolve();
-      if (readOnly) return Promise.resolve();   // 用户选了"不导入"：本页面完全不动 Worker
-      const heartbeat = !dataDirty;             // dirty=false 时 Worker 一个键都不写
-      setStatus('save', '正在同步…');
+      // 只读（用户选了"不导入"）只约束**自动**同步；手动点「立即同步」是明确指令，
+      // 照常发出去 —— 结果要么被 Worker 以 409 拒绝（会给出去向），要么真的推成功。
+      if (readOnly && !force) return Promise.resolve();
+      // force=true（手动点「立即同步」）不走差异检查：用户明确要求推送，就照推。
+      // 省额度的 dirty 优化只该作用于自动同步，不该把手动操作也挡住。
+      const dirty = (force || !readOnly) ? true : dataDirty;
+      setStatus('save', force ? '正在推送全部数据…' : '正在同步…');
       return fetch(base() + '/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Sync-Token': cfg.token },
-        body: buildPayload({ dirty: heartbeat ? false : true })
-      }).then(function (r) { return readJson(r).then(function (j) { return applyReply(j, r.status); }); })
+        body: buildPayload({ dirty: force ? true : dirty })
+      }).then(function (r) { return readJson(r).then(function (j) { return applyReply(j, r.status, force); }); })
         .catch(function (e) { setStatus('err', '无法连接 Worker：' + (e && e.message ? e.message : e)); });
     }
 
     function scheduleSync(delay) {
       if (!enabled()) return;
       clearTimeout(syncTimer);
-      syncTimer = setTimeout(syncNow, typeof delay === 'number' ? delay : 1500);
+      syncTimer = setTimeout(function () { syncNow(false); }, typeof delay === 'number' ? delay : 1500);
     }
 
     function beacon() {
@@ -1575,13 +1579,15 @@
 
     nowBtn.addEventListener('click', function () {
       refreshCfg();
-      syncNow();
+      syncNow(true);      // 手动同步：不做差异检查，强制推一次
     });
 
-    /* 接管为通知源：走与自动询问同一套三选一流程 */
+    /* 接管为通知源：走与自动询问同一套三选一流程。
+       用户主动点击 = 明确想反悔，所以先清掉"已决定不导入"的标记。 */
     claimBtn.addEventListener('click', function () {
       refreshCfg();
       if (!ready()) { setStatus('err', '请先填写 Worker 地址与同步令牌'); return; }
+      setDeclined('');
       askImport(true);
     });
 
