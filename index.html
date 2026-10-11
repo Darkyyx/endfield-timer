@@ -1189,15 +1189,9 @@
 
     /* KV 额度用尽的状态要跨刷新保留：只读/无改动的请求不写 KV，
        不能因为"这次请求本身成功"就显示绿灯。 */
-    /* 额度重置时间：Cloudflare 按 UTC 零点重置额度，这里换算成北京时间显示 */
+    /* 额度重置时间：Cloudflare 按 UTC 零点重置额度，即北京时间每天 08:00 */
     function quotaResetHint() {
-      if (!quotaAt) return '每天';
-      const d = new Date(quotaAt);
-      d.setUTCHours(24, 0, 0, 0);                 // 下一个 UTC 零点
-      const bj = new Date(d.getTime() + 8 * 3600 * 1000);   // 换算成 UTC+8
-      const p = function (n) { return String(n).padStart(2, '0'); };
-      return '北京时间 ' + p(bj.getUTCMonth() + 1) + '-' + p(bj.getUTCDate())
-        + ' ' + p(bj.getUTCHours()) + ':' + p(bj.getUTCMinutes()) + ' 后';
+      return '每日 08:00';
     }
 
     function readQuotaAt() {
@@ -1325,9 +1319,7 @@
       const qAt = num(data.quota, 0) ? (Number(data.quotaAt) || Date.now()) : Number(data.quotaAt) || 0;
       setQuotaAt(qAt);
       if (quotaAt) {
-        setStatus('err', 'KV 写入额度已用尽（免费版 1000 次/天，' + quotaResetHint()
-          + '重置）· 新数据暂存不进 Worker，本地倒计时照常；'
-          + '手机通知仍会按 Worker 上最后一份快照继续，但数据可能偏旧，且旧快照可能反复触发提醒');
+        setStatus('err', 'KV 写入额度已用尽（免费版 1000 次/天，' + quotaResetHint() + ' 时重置）');
         return;
       }
 
@@ -1643,9 +1635,7 @@
     setStatus(
       quotaAt ? 'err' : (cfg.on ? (ready() ? 'idle' : 'err') : 'off'),
       quotaAt
-        ? 'KV 写入额度已用尽（免费版 1000 次/天，' + quotaResetHint()
-          + '重置）· 新数据暂存不进 Worker，本地倒计时照常；'
-          + '手机通知仍会按 Worker 上最后一份快照继续，但数据可能偏旧，且旧快照可能反复触发提醒'
+        ? 'KV 写入额度已用尽（免费版 1000 次/天，' + quotaResetHint() + ' 时重置）'
         : (cfg.on ? (ready() ? '等待首次同步…' : '未填写 Worker 地址或同步令牌') : '未开启 · 数据只保存在本机')
     );
 

@@ -184,7 +184,7 @@ await check('消息区说明是 KV 额度问题，并说明本地倒计时不受
   await new Promise(r => setTimeout(r, 60));
   const msg = String(getEl('ntMsg').textContent);
   assert(/额度/.test(msg), '未提示额度：' + msg);
-  assert(/未存入|暂存不进/.test(msg), '未说明数据没存进去：' + msg);
+  assert(/额度已用尽/.test(msg), '未说明额度问题：' + msg);
   return msg.slice(0, 40) + '…';
 });
 
@@ -260,18 +260,19 @@ await check('额度提示里的重置时间按 UTC+8 显示，不再是 UTC', as
   await new Promise(r => setTimeout(r, 60));
   const msg = String(getEl('ntMsg').textContent);
   assert(!/UTC/.test(msg), '文案里仍有 UTC：' + msg);
-  assert(/北京时间/.test(msg), '未按北京时间显示：' + msg);
+  assert(/每日 08:00 时重置/.test(msg), '未按北京时间 08:00 显示：' + msg);
   return msg.slice(0, 46) + '…';
 });
 
-await check('不再声称"手机通知会停"（实际仍按最后快照推送）', async () => {
+await check('额度文案只说明额度与重置时间，不再额外解释通知行为', async () => {
   const { getEl } = boot(quotaReply);
   getEl('ntNow').listeners.click.forEach(fn => fn());
   await new Promise(r => setTimeout(r, 60));
   const msg = String(getEl('ntMsg').textContent);
   assert(!/通知会停/.test(msg), '仍在错误地宣称通知会停：' + msg);
-  assert(/最后一份快照/.test(msg), '未说明通知仍会继续：' + msg);
-  return '已改为"仍按最后一份快照继续"';
+  assert(!/最后一份快照|反复触发提醒/.test(msg), '仍带有被要求删除的解释：' + msg);
+  assert(/免费版 1000 次\/天/.test(msg), '缺少额度说明：' + msg);
+  return msg;
 });
 
 console.log('\nE. Worker 版本一致性');

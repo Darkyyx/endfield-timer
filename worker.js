@@ -337,7 +337,7 @@ async function saveQuotaFlag(env, at) {
  */
 const QUOTA_RE = /limit exceeded|quota|429|daily/i;
 // 额度按 UTC 零点重置；换算成 UTC+8 展示，避免用户自己算时差
-const QUOTA_MSG = 'KV 每日写入额度已用尽（免费版 1000 次/天），北京时间每天 08:00 重置';
+const QUOTA_MSG = 'KV 每日写入额度已用尽（免费版 1000 次/天），每日 08:00 时重置';
 
 async function safePut(env, pairs) {
   const list = (pairs || []).filter(function (p) { return p && p.key; });
