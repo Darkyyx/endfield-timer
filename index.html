@@ -521,8 +521,8 @@
 
       <div class="ntToggles">
         <label class="ntChk"><input type="checkbox" id="ntOn">开启通知</label>
-        <label class="ntChk"><input type="checkbox" id="ntWarnFull">爆仓方向（生产 &gt; 消耗）</label>
-        <label class="ntChk"><input type="checkbox" id="ntWarnEmpty">耗尽方向（消耗 &gt; 生产）</label>
+        <label class="ntChk"><input type="checkbox" id="ntWarnFull">爆仓物品</label>
+        <label class="ntChk"><input type="checkbox" id="ntWarnEmpty">耗尽物品</label>
       </div>
 
       <div class="ntActions">
@@ -1522,6 +1522,7 @@
     [urlEl, tokenEl, warnEl].forEach(function (el) {
       el.addEventListener('input', function () {
         refreshCfg();
+        paintStats();     // 预警分钟数变了，HUD 上的统计窗口要跟着变
         if (cfg.on && !ready()) setStatus('err', '未填写 Worker 地址或同步令牌');
         else if (enabled()) { setStatus('idle', '设置已更新，正在同步…'); scheduleSync(600); }
         else setStatus('off', '未开启 · 数据只保存在本机');
@@ -1603,6 +1604,7 @@
 
     return {
       hudHtml: hudHtml,
+      warnMinutes: function () { return cfg.warn; },
       scheduleSync: scheduleSync,
       syncNow: syncNow,
       onEditingChange: onEditingChange,
@@ -1678,17 +1680,25 @@
     }
   }
 
+  /** 预警窗口秒数：以设置面板里的「预警提前量」为准，与 Worker 用的是同一个值 */
+  function warnSeconds() {
+    const m = notify && notify.warnMinutes ? notify.warnMinutes() : 0;
+    return (m > 0 ? m : 30) * 60;
+  }
+
   function paintStats() {
+    const win = warnSeconds();          // 跟随设置，不再写死 1 小时
+    const mins = Math.round(win / 60);
     let soon = 0, drain = 0;
     rows.forEach(function (r) {
       const c = compute(r);
-      if (c.state === 'filling' && c.seconds < 3600) soon++;
-      if (c.state === 'draining' && c.seconds < 3600) drain++;
+      if (c.state === 'filling' && c.seconds < win) soon++;
+      if (c.state === 'draining' && c.seconds < win) drain++;
     });
     statsEl.innerHTML =
       '<span>产物 <b>' + rows.length + '</b></span>' +
-      '<span class="soon">1h 内爆仓 <b>' + soon + '</b></span>' +
-      '<span class="drain">1h 内耗尽 <b>' + drain + '</b></span>' +
+      '<span class="soon">' + mins + ' 分钟内爆仓 <b>' + soon + '</b></span>' +
+      '<span class="drain">' + mins + ' 分钟内耗尽 <b>' + drain + '</b></span>' +
       (notify ? notify.hudHtml() : '');
   }
 
