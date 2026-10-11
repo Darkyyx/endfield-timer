@@ -293,8 +293,18 @@ async function effectiveConfig(env, cfg) {
     types: {
       full: at.full !== false,
       empty: at.empty !== false
-    }
+    },
+    lastQuotaAt: num(meta.lastQuotaAt)
   };
+}
+
+async function saveQuotaFlag(env, at) {
+  try {
+    const prev = (await env.STATE.get('meta:config', 'json')) || {};
+    prev.lastQuotaAt = at;
+    prev.updatedAt = Date.now();
+    await env.STATE.put('meta:config', JSON.stringify(prev));
+  } catch (e) { /* 写不进去是正常的（正因为写不进去才要记） */ }
 }
 
 /**
@@ -306,7 +316,7 @@ async function effectiveConfig(env, cfg) {
  * 另外把"配额耗尽"这类可恢复错误换成可读信息，而不是让页面显示一串英文异常。
  */
 const QUOTA_RE = /limit exceeded|quota|429|daily/i;
-const QUOTA_MSG = 'KV 每日写入额度已用尽（免费版 1000 次/天），明天会恢复';
+const QUOTA_MSG = 'KV 每日写入额度已用尽（免费版 1000 次/天），UTC 零点重置';
 
 async function safePut(env, pairs) {
   const list = (pairs || []).filter(function (p) { return p && p.key; });
@@ -317,7 +327,9 @@ async function safePut(env, pairs) {
   } catch (err) {
     const msg = String((err && err.message) || err);
     if (QUOTA_RE.test(msg)) {
-      return { ok: false, quota: true, message: QUOTA_MSG };
+      // 失败时没法往 KV 写任何东西，所以把时间戳交给调用方，
+      // 让它烙进"这次本来要写的内容"里 —— 下一次成功写入就把它捎进去了。
+      return { ok: false, quota: true, at: Date.now(), message: QUOTA_MSG };
     }
     throw err;
   }
@@ -331,9 +343,7 @@ async function safeDelete(env, keys) {
     return { ok: true, count: list.length };
   } catch (err) {
     const msg = String((err && err.message) || err);
-    if (QUOTA_RE.test(msg)) {
-      return { ok: false, quota: true, message: QUOTA_MSG };
-    }
+    if (QUOTA_RE.test(msg)) return { ok: false, quota: true, at: Date.now(), message: QUOTA_MSG };
     throw err;
   }
 }
@@ -395,7 +405,7 @@ async function handleSync(request, env, cfg) {
     owner = { clientId: clientId, host: clientHost, since: Date.now() };
     const ownRes = await safePut(env, [{ key: 'meta:owner', value: JSON.stringify(owner) }]);
     if (ownRes.quota) {
-      return json({ ok: 0, quota: 1, message: ownRes.message }, 503);
+      return json({ ok: 1, quota: 1, quotaAt: ownRes.at, message: ownRes.message, rows: 0 }, 200);
     }
   }
 
@@ -457,6 +467,7 @@ async function handleSync(request, env, cfg) {
   let foreignRows = 0;
   let removed = 0;
   let lastPushAt = 0;
+  let lastQuota = 0;
   let lastPushOk = true;
   let lastError = null;
   const missPuts = [];
@@ -465,6 +476,10 @@ async function handleSync(request, env, cfg) {
   for (const k of list.keys) {
     const prev = (await env.STATE.get(k.name, 'json')) || {};
     const id = k.name.slice(4);
+    // 上次写入是否因额度失败：这个标记会被成功写入时一起带进 KV，
+    // 所以只读请求（dirty=false）也能如实把它报给页面
+    const qAt = num(prev.lastQuotaAt) || num(prev.lastQuota);
+    if (qAt > lastQuota) lastQuota = qAt;
     // 如实汇报：KV 里有多少行不属于本页面（含换域名后的残留）。
     // "刚接管完要不要再问一次"是页面的判断，不在这里替它决定。
     const foreign = !!clientId && String(prev.client || '') !== clientId;
@@ -491,11 +506,25 @@ async function handleSync(request, env, cfg) {
   const putRes = await safePut(env, rowPuts.concat(missPuts));
   const delRes = await safeDelete(env, delKeys);
   const quotaHit = putRes.quota || delRes.quota;
+  const quotaAt = putRes.at || delRes.at || 0;
+  const quotaMsg = putRes.message || delRes.message || QUOTA_MSG;
+  if (quotaHit) await saveQuotaFlag(env, quotaAt);
+
+  // 只读请求（dirty=false）一个字节都没写，所以要顺带把"上次是否因额度失败"报出去，
+  // 否则页面在只读/无改动状态下会看到绿灯，误以为一切正常。
+  // 注意：额度用尽时 Worker 自己也没法把标记写进 KV（正是同一个原因），
+  // 因此页面会把上次的时间戳随请求带上来，这里只做回显。
+  const echoed = num(body && body.quotaAt);
+  const cfgMeta = quotaHit ? null : await effectiveConfig(env, cfg);
+  const reportedQuotaAt = quotaHit ? quotaAt
+    : (lastQuota || echoed || (cfgMeta && cfgMeta.lastQuotaAt) || 0);
 
   return json({
-    ok: quotaHit ? 0 : 1,
-    quota: quotaHit ? 1 : 0,
-    message: quotaHit ? (putRes.message || delRes.message) : undefined,
+    ok: 1,                              // 请求本身处理成功；额度问题用 quota 字段单独表达
+    quota: reportedQuotaAt ? 1 : 0,     // 含"这次没写、但已知额度不足"的情况
+    quotaAt: reportedQuotaAt,
+    message: reportedQuotaAt ? quotaMsg : undefined,
+    writes: rowPuts.length + missPuts.length,
     rows: written,
     removed: removed,
     foreignRows: foreignRows,          // 属于别的页面的残留行数量，>0 时前端会问你要不要导入
@@ -505,7 +534,7 @@ async function handleSync(request, env, cfg) {
     lastPushAt: lastPushAt,
     lastPushOk: lastPushOk,
     lastError: lastError
-  }, quotaHit ? 503 : 200);
+  });
 }
 
 /* ================= 数据源归属：/claim 与 /snapshot ================= */
@@ -651,12 +680,14 @@ async function handleResetAlerts(request, env, cfg) {
     reset++;
   }
   const putRes = await safePut(env, puts);
+  if (putRes.quota) await saveQuotaFlag(env, putRes.at);
   return json({
-    ok: putRes.ok ? 1 : 0,
+    ok: 1,                              // 与 /sync 一致：请求成功，配额问题用 quota 表达
     quota: putRes.quota ? 1 : 0,
+    quotaAt: putRes.at || 0,
     message: putRes.quota ? putRes.message : undefined,
     reset: reset
-  }, putRes.ok ? 200 : 503);
+  });
 }
 
 /* ================= /test 与推送 ================= */
@@ -790,7 +821,8 @@ async function runPatrol(env, cfg) {
   }
 
   if (!candidates.length) {
-    await safePut(env, writes);   // 只有状态复位要落盘时，也只是一次写
+    const r = await safePut(env, writes);   // 只有状态复位要落盘时，也只是一次写
+    if (r.quota) await saveQuotaFlag(env, r.at);
     return;
   }
 
@@ -818,5 +850,6 @@ async function runPatrol(env, cfg) {
     c.row.lastPushAt = now;
     writes.push({ key: c.key, value: JSON.stringify(c.row) });
   }
-  await safePut(env, writes);
+  const pr = await safePut(env, writes);
+  if (pr.quota) await saveQuotaFlag(env, pr.at);   // 尽力记录，供只读请求如实上报
 }

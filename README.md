@@ -104,7 +104,7 @@ curl -X POST "https://<你的 Worker>/claim?token=<CLAIM_TOKEN>" \
 - `POST https://<你的 Worker>/claim` — 接管为通知源（见上一节）。
 - `POST https://<你的 Worker>/reset-alerts` — 清空全部「已提醒」标记。
 - 页面状态灯显示**推送异常**时，消息区会显示 Server酱 返回的原始错误（如 Key 失效、额度用尽）。
-- 若显示 `KV 每日写入额度已用尽`：说明 Cloudflare 免费版的 1000 次写/天用完了（正常使用不会碰到，出现通常意味着刚一次性重填了很多行），明天自动恢复，期间页面会照常显示本地倒计时、但通知会停。
+- 若显示 `KV 写入额度已用尽`：Cloudflare 免费版每天 1000 次写，用完后 Worker 不再接收数据（页面会亮**红灯**并说明数据未存入，但本地倒计时照常工作）。**UTC 零点重置**，届时会自动恢复。正常使用碰不到——实测挂机 + 每天若干次修改的总写入量接近 0。
 - 常见提示对照：
   - `未配置 SC_SENDKEY` — 变量没配，或配完没重新 Deploy。
   - `无法从 SendKey 解析 UID` — SendKey 不是 `sctp` 开头的格式，额外配一个 `SC_UID` 即可。
@@ -114,11 +114,13 @@ curl -X POST "https://<你的 Worker>/claim?token=<CLAIM_TOKEN>" \
 ### 本地跑自测
 
 ```bash
-node worker.test.mjs         # 104 项：等级判定、去抖、聚合消息、推送重试、SendKey 解析 UID、方向开关、鉴权
-node worker.owner.test.mjs   # 19 项：数据源归属、换域名导入流程、只读态
+node worker.test.mjs          # 等级判定、去抖、聚合消息、推送重试、SendKey 解析 UID、方向开关、鉴权
+node worker.owner.test.mjs    # 数据源归属、换域名导入流程、只读态
+node worker.quota.test.mjs    # KV 每日写入额度预算（防止再把额度写爆）
+node worker.quota-ui.test.mjs # 额度用尽时的状态上报与页面红灯
 ```
 
-两个脚本都不需要任何依赖。
+四个脚本都不需要任何依赖。
 
 ---
 

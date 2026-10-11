@@ -151,16 +151,19 @@ await check('改预警设置只写 1 次；设置没变则 0 次', async () => {
 
 console.log('\nB. 额度耗尽时的表现');
 
-await check('额度耗尽 + 确实需要写 → 返回 503 与可读信息，而不是英文异常', async () => {
+await check('额度耗尽 + 确实需要写 → quota=1 与可读信息，而不是英文异常', async () => {
   const kv = makeKV();
-  kv.stats.quotaLeft = 0;
   const env = Object.assign({}, ENV, { STATE: kv });
-  const res = await worker.fetch(req('/sync', syncBody({ dirty: true })), env, {});
+  await worker.fetch(req('/sync', syncBody({ dirty: true })), env, {});
+  kv.stats.quotaLeft = 0;                       // 现在开始额度用尽
+  const rows = rowsFor(20);
+  rows[0].stock = 999999;                       // 制造一次真实写入需求
+  const res = await worker.fetch(req('/sync', syncBody({ dirty: true, rows: rows })), env, {});
   const j = await res.json();
-  assert(res.status === 503, '状态码 = ' + res.status);
-  assert(j.ok === 0 && j.quota === 1, '未标记配额问题：' + JSON.stringify(j));
+  assert(res.status === 200, '状态码 = ' + res.status + '（请求本身成功，配额单独表达）');
+  assert(j.ok === 1 && j.quota === 1, '未标记配额问题：' + JSON.stringify(j));
   assert(/额度/.test(j.message), '信息不可读：' + j.message);
-  return 'HTTP 503 · ' + j.message;
+  return 'quota=1 · ' + j.message;
 });
 
 await check('额度耗尽但无需写入（数据已在 KV）→ 成功且 0 次写', async () => {
@@ -182,10 +185,10 @@ await check('额度耗尽时不会抛出未捕获异常', async () => {
   await worker.fetch(req('/sync', syncBody({ dirty: true })), env, {});
   kv.stats.quotaLeft = 0;
   const res = await worker.fetch(req('/reset-alerts', {}), env, {});
-  assert(res.status === 503, '状态码 = ' + res.status);
+  assert(res.status === 200, '状态码 = ' + res.status);
   const j = await res.json();
-  assert(j.quota === 1, '未标记配额问题');
-  return '/reset-alerts 也优雅降级';
+  assert(j.quota === 1 && /额度/.test(j.message || ''), '未标记配额问题：' + JSON.stringify(j));
+  return '/reset-alerts 也如实上报';
 });
 
 console.log('\nC. 预警照常工作（别为了省额度把功能改坏）');

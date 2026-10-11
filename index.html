@@ -542,7 +542,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.5.0</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.5.1</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -1103,6 +1103,7 @@
     const CLIENT_KEY = 'endfield_client_v1';       // 本 origin 的身份，用于区分"哪个页面是通知源"
     const DECLINE_KEY = 'endfield_import_declined'; // 记下"这次不导入"，避免每 60 秒反复问
     const CLAIM_TS_KEY = 'endfield_claim_at';       // 最近一次接管的时间
+    const QUOTA_TS_KEY = 'endfield_quota_at';       // KV 额度用尽的时间（跨刷新保留）
     const CLAIM_QUIET_MS = 10 * 60 * 1000;          // 接管后这段时间内不再追问导入
 
     const $ = function (id) { return document.getElementById(id); };
@@ -1127,6 +1128,7 @@
     let blockedOwner = '';    // 当前占着 Worker 的那个页面
     let foreignRows = 0;      // Worker 里属于别的页面的残留行数
     let claimedAt = 0;        // 本页面最近一次接管的时间
+    let quotaAt = 0;          // KV 额度用尽的时间（0 = 正常）
     let readOnly = false;     // 用户选了"不导入"，本页面保持只读
     let claiming = false;
 
@@ -1181,6 +1183,16 @@
     }
     function markClaimed() {
       try { localStorage.setItem(CLAIM_TS_KEY, String(Date.now())); } catch (e) { /* 忽略 */ }
+    }
+
+    /* KV 额度用尽的状态要跨刷新保留：只读/无改动的请求不写 KV，
+       不能因为"这次请求本身成功"就显示绿灯。 */
+    function readQuotaAt() {
+      try { return Number(localStorage.getItem(QUOTA_TS_KEY)) || 0; } catch (e) { return 0; }
+    }
+    function setQuotaAt(v) {
+      quotaAt = Number(v) || 0;
+      try { v ? localStorage.setItem(QUOTA_TS_KEY, String(v)) : localStorage.removeItem(QUOTA_TS_KEY); } catch (e) { /* 忽略 */ }
     }
 
     let cfg = loadCfg();
@@ -1251,6 +1263,7 @@
         clientHost: location.host,
         clientTs: t,
         dirty: dataDirty,
+        quotaAt: quotaAt || 0,      // 回显给 Worker：额度用尽时它自己写不进 KV，只能靠页面记着
         warnMinutes: cfg.warn,
         alertTypes: alertTypes(),
         rows: list
@@ -1283,8 +1296,17 @@
         return;
       }
 
-      dataDirty = false;    // 本轮数据已经交给 Worker，接下来只发心跳
+      dataDirty = false;    // 本轮数据已经交给 Worker
       lastPushAt = Number(data.lastPushAt) || 0;
+
+      // KV 额度：命中就是错误态，必须红灯；只读时上报的历史记录同样要保留
+      const qAt = num(data.quota, 0) ? (Number(data.quotaAt) || Date.now()) : Number(data.quotaAt) || 0;
+      setQuotaAt(qAt);
+      if (quotaAt) {
+        setStatus('err', 'KV 写入额度已用尽（免费版 1000 次/天，UTC 零点重置）· 数据未存入 Worker，'
+          + '本地倒计时不受影响，但手机通知会停');
+        return;
+      }
 
       // 刚接管完的那段时间里，KV 里还留着旧 client 的行（要缺席两轮才清掉）。
       // 那不是"新发现的旧数据"，不该再问一次，否则接管成功后会立刻被重复追问。
@@ -1304,7 +1326,7 @@
           ? (claimingRecently
             ? '（正在清理 ' + foreign + ' 条旧数据）'
             : '（另有 ' + foreign + ' 条别处数据待接管）')
-          : '';
+          : (!dataDirty && !readOnly && num(data.writes, 0) === 0 ? '（无改动，未写入）' : '');
         setStatus('ok', '已同步 ' + data.rows + ' 条 · '
           + (lastPushAt ? ('最近推送 ' + new Date(lastPushAt).toLocaleTimeString('zh-CN')) : '尚未推送') + tail);
       }
@@ -1586,11 +1608,14 @@
     warnEl.value = String(cfg.warn);
     onEl.checked = cfg.on;
     claimedAt = readClaimTs();
+    quotaAt = readQuotaAt();
     fullEl.checked = cfg.warnFull;
     emptyEl.checked = cfg.warnEmpty;
     setStatus(
-      cfg.on ? (ready() ? 'idle' : 'err') : 'off',
-      cfg.on ? (ready() ? '等待首次同步…' : '未填写 Worker 地址或同步令牌') : '未开启 · 数据只保存在本机'
+      quotaAt ? 'err' : (cfg.on ? (ready() ? 'idle' : 'err') : 'off'),
+      quotaAt
+        ? 'KV 写入额度已用尽（免费版 1000 次/天，UTC 零点重置）· 数据未存入 Worker，本地倒计时不受影响，但手机通知会停'
+        : (cfg.on ? (ready() ? '等待首次同步…' : '未填写 Worker 地址或同步令牌') : '未开启 · 数据只保存在本机')
     );
 
     // 没有心跳定时器：挂机时不发任何请求。
