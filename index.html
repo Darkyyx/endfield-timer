@@ -68,9 +68,27 @@
   h1 span{color:var(--dim);font-weight:400;font-size:15px;letter-spacing:.15em;margin-left:12px}
   .stats{
     font-family:var(--mono);font-size:14px;color:var(--dim);
-    letter-spacing:.04em;display:flex;gap:24px;flex-wrap:wrap;
+    letter-spacing:.04em;display:flex;align-items:baseline;flex-wrap:wrap;
+    gap:8px 15px;
   }
-  .stats b{color:var(--txt);font-weight:600}
+  .stats > span{
+    display:inline-flex;align-items:baseline;
+    padding-left:15px;position:relative;
+  }
+  .stats > span + span::before{
+    content:'';position:absolute;left:0;top:50%;
+    transform:translateY(-50%);width:1px;height:12px;
+    background:rgba(255,255,255,.09);
+  }
+  .stats > span:first-child{padding-left:0}
+  .stats .k{
+    color:#6b7681;letter-spacing:.1em;
+    margin-right:5px;                   /* 防止 "5" 与后面的字连读成一串 */
+  }
+  .stats b{
+    color:var(--txt);font-weight:600;font-size:15px;
+    letter-spacing:.02em;margin:0 2px;
+  }
   .stats .soon b{color:var(--green-bright)}
   .stats .drain b{color:var(--red)}
 
@@ -372,10 +390,10 @@
     font-family:var(--mono);font-size:12.5px;color:#4b545d;letter-spacing:.05em;
   }
 
-  /* ============ 通知（Server酱） ============ */
-  .hud .stats .nstat{display:inline-flex;align-items:center;gap:7px}
+  /* ============ 同步状态（真实推送由 Worker 完成，这里只反映数据是否送达） ============ */
+  .stats .nstat{gap:7px}
   .nstat .dot{width:7px;height:7px;flex:0 0 auto;background:#3a424a;border-radius:50%}
-  .nstat .lbl{color:#5c666f}
+  .nstat .lbl{color:#8b959e;margin:0}
   .nstat.is-off .dot{background:#3a424a}
   .nstat.is-idle .dot{background:var(--cyan)}
   .nstat.is-ok{color:#7f8b95}
@@ -542,7 +560,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.5.3</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.6.0</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -556,7 +574,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.5.3';
+  const PAGE_VERSION = '1.6.0';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1227,25 +1245,37 @@
       try { return new URL(normalizeUrl(u)).host; } catch (e) { return String(u || '').replace(/^https?:\/\//i, '').split('/')[0]; }
     }
 
+    /* 右上角反映的是"数据同步状态"：真正的推送是 Worker 干的活，网页端只负责把数据送达。
+       目标域名移到 title 提示里，节省横向空间。 */
     function hudHtml() {
-      if (!cfg.on) return '<span class="nstat is-off"><i class="dot"></i><span class="lbl">通知 未开启</span></span>';
-      if (!ready()) return '<span class="nstat is-err"><i class="dot"></i><span class="lbl">通知 未配置地址或令牌</span></span>';
+      const DISABLED_TIP = '通知推送由 Cloudflare Worker 负责；网页端只负责把数据同步过去';
+
+      if (!cfg.on) {
+        return '<span class="nstat is-off" title="' + escAttr(DISABLED_TIP) + '">'
+          + '<i class="dot"></i><span class="lbl">同步 未开启</span></span>';
+      }
+      if (!ready()) {
+        return '<span class="nstat is-err" title="' + escAttr(DISABLED_TIP) + '">'
+          + '<i class="dot"></i><span class="lbl">同步 未配置</span></span>';
+      }
 
       const label = {
-        off: '通知 未开启',
-        idle: '通知 待同步',
-        ok: '通知 正常',
-        err: '通知 异常',
-        save: '通知 同步中',
-        blocked: '通知 待确认（非通知源）'
-      }[status] || '通知';
+        off: '同步 未开启',
+        idle: '同步 待发送',
+        ok: '同步 正常',
+        err: '同步 异常',
+        save: '同步 进行中',
+        blocked: '同步 待确认'
+      }[status] || '同步';
 
       const cls = status === 'save' ? 'is-save'
         : (status === 'blocked' ? 'is-err'
           : (status === 'err' ? 'is-err' : (status === 'ok' ? 'is-ok' : 'is-idle')));
 
-      return '<span class="nstat ' + cls + '"><i class="dot"></i><span class="lbl">'
-        + escAttr(label) + ' · ' + escAttr(hostOf(cfg.url)) + '</span></span>';
+      const tip = label + ' · ' + hostOf(cfg.url) + '\n' + DISABLED_TIP
+        + '\n\n最近一次：' + (detail || '—');
+      return '<span class="nstat ' + cls + '" title="' + escAttr(tip) + '">'
+        + '<i class="dot"></i><span class="lbl">' + escAttr(label) + '</span></span>';
     }
 
     /* 与 Worker 的 projectStock 对齐：同步的是时间锚点，不是当前数值 */
@@ -1742,9 +1772,9 @@
       if (c.state === 'draining' && c.seconds < win) drain++;
     });
     statsEl.innerHTML =
-      '<span>产物 <b>' + rows.length + '</b></span>' +
-      '<span class="soon">' + mins + ' 分钟内爆仓 <b>' + soon + '</b></span>' +
-      '<span class="drain">' + mins + ' 分钟内耗尽 <b>' + drain + '</b></span>' +
+      '<span><span class="k">产物</span><b>' + rows.length + '</b></span>' +
+      '<span class="soon"><span class="k">' + mins + ' 分钟内爆仓</span><b>' + soon + '</b></span>' +
+      '<span class="drain"><span class="k">' + mins + ' 分钟内耗尽</span><b>' + drain + '</b></span>' +
       (notify ? notify.hudHtml() : '');
   }
 

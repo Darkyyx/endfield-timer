@@ -163,7 +163,7 @@ function boot(reply, preStore) {
 
 let confirmValue = true;
 
-const okReply = { ok: 1, worker: '1.5.3', rows: 1, writes: 1, removed: 0, foreignRows: 0, quota: 0, quotaAt: 0, owner: { mine: true }, lastPushAt: 0, lastPushOk: true, lastError: null };
+const okReply = { ok: 1, worker: '1.6.0', rows: 1, writes: 1, removed: 0, foreignRows: 0, quota: 0, quotaAt: 0, owner: { mine: true }, lastPushAt: 0, lastPushOk: true, lastError: null };
 const quotaReply = Object.assign({}, okReply, { quota: 1, quotaAt: 1780000000000, message: 'KV 每日写入额度已用尽（免费版 1000 次/天），UTC 零点重置' });
 
 console.log('\nB. 页面显示');
@@ -173,9 +173,9 @@ await check('额度用尽 → 状态为异常（红灯），而不是"正常"', 
   getEl('ntNow').listeners.click.forEach(fn => fn());
   await new Promise(r => setTimeout(r, 60));
   const s = getEl('stats').innerHTML;
-  assert(s.includes('通知 异常'), '仍显示正常：' + s.slice(s.indexOf('nstat')));
-  assert(!s.includes('通知 正常'), '不能出现绿灯');
-  return '通知 异常';
+  assert(s.includes('同步 异常'), '仍显示正常：' + s.slice(s.indexOf('nstat')));
+  assert(!s.includes('同步 正常'), '不能出现绿灯');
+  return '同步 异常';
 });
 
 await check('消息区说明是 KV 额度问题，并说明本地倒计时不受影响', async () => {
@@ -197,7 +197,7 @@ await check('额度状态跨刷新保留（不会因为刷新又变绿灯）', a
   // 模拟刷新：带着上次的额度时间戳重新启动
   const again = boot(okReply, [['endfield_quota_at', store.get('endfield_quota_at')]]);
   const s = again.getEl('stats').innerHTML;
-  assert(s.includes('通知 异常'), '刷新后变回绿灯：' + s.slice(s.indexOf('nstat')));
+  assert(s.includes('同步 异常'), '刷新后变回绿灯：' + s.slice(s.indexOf('nstat')));
   return '刷新后仍是异常';
 });
 
@@ -206,9 +206,9 @@ await check('额度恢复（quota=0）后回到正常', async () => {
   getEl('ntNow').listeners.click.forEach(fn => fn());
   await new Promise(r => setTimeout(r, 60));
   const s = getEl('stats').innerHTML;
-  assert(s.includes('通知 正常'), '恢复后未回到正常：' + s.slice(s.indexOf('nstat')));
+  assert(s.includes('同步 正常'), '恢复后未回到正常：' + s.slice(s.indexOf('nstat')));
   assert(!store.get('endfield_quota_at'), '额度标记未清除');
-  return '通知 正常，标记已清除';
+  return '同步 正常，标记已清除';
 });
 
 console.log('\nC. 手动「立即同步」不受自动优化约束');
@@ -284,9 +284,9 @@ await check('Worker 版本与页面不一致 → 红灯并提示重新部署', a
   await new Promise(r => setTimeout(r, 60));
   const msg = String(getEl('ntMsg').textContent);
   const s = getEl('stats').innerHTML;
-  assert(s.includes('通知 异常'), '未亮红灯：' + s.slice(s.indexOf('nstat')));
+  assert(s.includes('同步 异常'), '未亮红灯：' + s.slice(s.indexOf('nstat')));
   assert(/版本不一致/.test(msg), '未提示版本问题：' + msg);
-  assert(/1\.4\.0/.test(msg) && /1.5.3/.test(msg), '未列出双方版本：' + msg);
+  assert(/1\.4\.0/.test(msg) && /1\.6\.0/.test(msg), '未列出双方版本：' + msg);
   return msg.slice(0, 44) + '…';
 });
 
@@ -295,8 +295,8 @@ await check('版本一致时不受影响', async () => {
   getEl('ntNow').listeners.click.forEach(fn => fn());
   await new Promise(r => setTimeout(r, 60));
   const s = getEl('stats').innerHTML;
-  assert(s.includes('通知 正常'), '版本一致却报错：' + s.slice(s.indexOf('nstat')));
-  return '通知 正常';
+  assert(s.includes('同步 正常'), '版本一致却报错：' + s.slice(s.indexOf('nstat')));
+  return '同步 正常';
 });
 
 await check('旧版 Worker 不返回 worker 字段时不误报', async () => {
@@ -306,7 +306,7 @@ await check('旧版 Worker 不返回 worker 字段时不误报', async () => {
   getEl('ntNow').listeners.click.forEach(fn => fn());
   await new Promise(r => setTimeout(r, 60));
   const s = getEl('stats').innerHTML;
-  assert(!s.includes('通知 异常'), '旧版 Worker 被误判：' + s.slice(s.indexOf('nstat')));
+  assert(!s.includes('同步 异常'), '旧版 Worker 被误判：' + s.slice(s.indexOf('nstat')));
   return '不误报';
 });
 
