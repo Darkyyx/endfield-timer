@@ -163,7 +163,13 @@ function boot(reply, preStore) {
 
 let confirmValue = true;
 
-const okReply = { ok: 1, worker: '1.6.1', rows: 1, writes: 1, removed: 0, foreignRows: 0, quota: 0, quotaAt: 0, owner: { mine: true }, lastPushAt: 0, lastPushOk: true, lastError: null };
+/* 版本号从源码里读，避免每次升版本都要改测试 */
+const pageVersion = (fs.readFileSync(new URL('./index.html', import.meta.url), 'utf8')
+  .match(/const PAGE_VERSION = '([^']+)'/) || [])[1] || '';
+const workerVersion = (fs.readFileSync(new URL('./worker.js', import.meta.url), 'utf8')
+  .match(/const WORKER_VERSION = '([^']+)'/) || [])[1] || '';
+
+const okReply = { ok: 1, worker: pageVersion, rows: 1, writes: 1, removed: 0, foreignRows: 0, quota: 0, quotaAt: 0, owner: { mine: true }, lastPushAt: 0, lastPushOk: true, lastError: null };
 const quotaReply = Object.assign({}, okReply, { quota: 1, quotaAt: 1780000000000, message: 'KV 每日写入额度已用尽（免费版 1000 次/天），UTC 零点重置' });
 
 console.log('\nB. 页面显示');
@@ -277,8 +283,15 @@ await check('额度文案只说明额度与重置时间，不再额外解释通�
 
 console.log('\nE. Worker 版本一致性');
 
+await check('页面与 Worker 的版本号常量保持一致', () => {
+  assert(pageVersion, '未找到 PAGE_VERSION');
+  assert(workerVersion, '未找到 WORKER_VERSION');
+  assert(pageVersion === workerVersion, '两边版本不一致：页面 ' + pageVersion + ' / Worker ' + workerVersion);
+  return 'v' + pageVersion;
+});
+
 await check('Worker 版本与页面不一致 → 红灯并提示重新部署', async () => {
-  const stale = Object.assign({}, okReply, { worker: '1.4.0' });
+  const stale = Object.assign({}, okReply, { worker: '0.0.1' });
   const { getEl } = boot(stale);
   getEl('ntNow').listeners.click.forEach(fn => fn());
   await new Promise(r => setTimeout(r, 60));
@@ -286,7 +299,8 @@ await check('Worker 版本与页面不一致 → 红灯并提示重新部署', a
   const s = getEl('stats').innerHTML;
   assert(s.includes('同步 异常'), '未亮红灯：' + s.slice(s.indexOf('nstat')));
   assert(/版本不一致/.test(msg), '未提示版本问题：' + msg);
-  assert(/1\.4\.0/.test(msg) && /1.6.1/.test(msg), '未列出双方版本：' + msg);
+  assert(msg.indexOf('0.0.1') >= 0, '未列出 Worker 版本：' + msg);
+  assert(msg.indexOf(pageVersion) >= 0, '未列出版本页面的版本号：' + msg);
   return msg.slice(0, 44) + '…';
 });
 
