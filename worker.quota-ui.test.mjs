@@ -163,7 +163,7 @@ function boot(reply, preStore) {
 
 let confirmValue = true;
 
-const okReply = { ok: 1, worker: '1.6.0', rows: 1, writes: 1, removed: 0, foreignRows: 0, quota: 0, quotaAt: 0, owner: { mine: true }, lastPushAt: 0, lastPushOk: true, lastError: null };
+const okReply = { ok: 1, worker: '1.6.1', rows: 1, writes: 1, removed: 0, foreignRows: 0, quota: 0, quotaAt: 0, owner: { mine: true }, lastPushAt: 0, lastPushOk: true, lastError: null };
 const quotaReply = Object.assign({}, okReply, { quota: 1, quotaAt: 1780000000000, message: 'KV 每日写入额度已用尽（免费版 1000 次/天），UTC 零点重置' });
 
 console.log('\nB. 页面显示');
@@ -286,7 +286,7 @@ await check('Worker 版本与页面不一致 → 红灯并提示重新部署', a
   const s = getEl('stats').innerHTML;
   assert(s.includes('同步 异常'), '未亮红灯：' + s.slice(s.indexOf('nstat')));
   assert(/版本不一致/.test(msg), '未提示版本问题：' + msg);
-  assert(/1\.4\.0/.test(msg) && /1\.6\.0/.test(msg), '未列出双方版本：' + msg);
+  assert(/1\.4\.0/.test(msg) && /1.6.1/.test(msg), '未列出双方版本：' + msg);
   return msg.slice(0, 44) + '…';
 });
 
