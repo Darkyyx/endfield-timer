@@ -163,7 +163,7 @@ function boot(reply, preStore) {
 
 let confirmValue = true;
 
-const okReply = { ok: 1, rows: 1, writes: 1, removed: 0, foreignRows: 0, quota: 0, quotaAt: 0, owner: { mine: true }, lastPushAt: 0, lastPushOk: true, lastError: null };
+const okReply = { ok: 1, worker: '1.5.2', rows: 1, writes: 1, removed: 0, foreignRows: 0, quota: 0, quotaAt: 0, owner: { mine: true }, lastPushAt: 0, lastPushOk: true, lastError: null };
 const quotaReply = Object.assign({}, okReply, { quota: 1, quotaAt: 1780000000000, message: 'KV 每日写入额度已用尽（免费版 1000 次/天），UTC 零点重置' });
 
 console.log('\nB. 页面显示');
@@ -250,6 +250,41 @@ await check('只读状态下手动「立即同步」也会真的发出去（不�
   assert(sent().length > before, '只读时手动同步被静默挡掉了');
   confirmValue = true;
   return '已发出请求（会被 Worker 以 409 告知去向）';
+});
+
+console.log('\nD. Worker 版本一致性');
+
+await check('Worker 版本与页面不一致 → 红灯并提示重新部署', async () => {
+  const stale = Object.assign({}, okReply, { worker: '1.4.0' });
+  const { getEl } = boot(stale);
+  getEl('ntNow').listeners.click.forEach(fn => fn());
+  await new Promise(r => setTimeout(r, 60));
+  const msg = String(getEl('ntMsg').textContent);
+  const s = getEl('stats').innerHTML;
+  assert(s.includes('通知 异常'), '未亮红灯：' + s.slice(s.indexOf('nstat')));
+  assert(/版本不一致/.test(msg), '未提示版本问题：' + msg);
+  assert(/1\.4\.0/.test(msg) && /1\.5\.2/.test(msg), '未列出双方版本：' + msg);
+  return msg.slice(0, 44) + '…';
+});
+
+await check('版本一致时不受影响', async () => {
+  const { getEl } = boot(okReply);
+  getEl('ntNow').listeners.click.forEach(fn => fn());
+  await new Promise(r => setTimeout(r, 60));
+  const s = getEl('stats').innerHTML;
+  assert(s.includes('通知 正常'), '版本一致却报错：' + s.slice(s.indexOf('nstat')));
+  return '通知 正常';
+});
+
+await check('旧版 Worker 不返回 worker 字段时不误报', async () => {
+  const legacy = Object.assign({}, okReply);
+  delete legacy.worker;
+  const { getEl } = boot(legacy);
+  getEl('ntNow').listeners.click.forEach(fn => fn());
+  await new Promise(r => setTimeout(r, 60));
+  const s = getEl('stats').innerHTML;
+  assert(!s.includes('通知 异常'), '旧版 Worker 被误判：' + s.slice(s.indexOf('nstat')));
+  return '不误报';
 });
 
 console.log('\n结果：' + (failed === 0 ? '全部通过' : failed + ' 项失败'));

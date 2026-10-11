@@ -12,6 +12,12 @@
  * ============================================================ */
 
 /* ================= 配置（可在 Dashboard 覆盖） ================= */
+
+/* Worker 版本号。页面会拿它和自身版本比对，不一致就提示"该重新部署 Worker 了" —— 
+   否则改了 worker.js 却忘了部署，会表现为"功能不生效"且毫无线索。
+   发新版时与 index.html 页脚的版本号保持一致。 */
+const WORKER_VERSION = '1.5.2';
+
 const DEFAULTS = {
   // 推送到某个产线达到上限/下限前多少秒开始预警
   WARN_SECONDS: 1800,
@@ -213,6 +219,9 @@ export default {
     }
 
     try {
+      if (url.pathname === '/version') {
+        return json({ ok: 1, version: WORKER_VERSION });
+      }
       if (url.pathname === '/sync') {
         return await handleSync(request, env, cfg);
       }
@@ -521,6 +530,7 @@ async function handleSync(request, env, cfg) {
 
   return json({
     ok: 1,                              // 请求本身处理成功；额度问题用 quota 字段单独表达
+    worker: WORKER_VERSION,             // 让页面能发现"Worker 忘了重新部署"
     quota: reportedQuotaAt ? 1 : 0,     // 含"这次没写、但已知额度不足"的情况
     quotaAt: reportedQuotaAt,
     message: reportedQuotaAt ? quotaMsg : undefined,

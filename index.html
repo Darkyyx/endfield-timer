@@ -555,6 +555,8 @@
   /* ================= 配置 ================= */
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
+  /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
+  const PAGE_VERSION = '1.5.2';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1298,6 +1300,15 @@
 
       dataDirty = false;    // 本轮数据已经交给 Worker
       lastPushAt = Number(data.lastPushAt) || 0;
+
+      // 版本对不上 → 多半是改了 worker.js 却没在 Cloudflare 重新部署。
+      // 不提示的话，症状会是"功能莫名不生效"，完全查不出原因。
+      const wv = data.worker || '';
+      if (wv && wv !== PAGE_VERSION) {
+        setStatus('err', 'Worker 版本不一致（页面 v' + PAGE_VERSION + ' / Worker v' + wv
+          + '）· 请到 Cloudflare 重新粘贴部署 worker.js');
+        return;
+      }
 
       // KV 额度：命中就是错误态，必须红灯；只读时上报的历史记录同样要保留
       const qAt = num(data.quota, 0) ? (Number(data.quotaAt) || Date.now()) : Number(data.quotaAt) || 0;
