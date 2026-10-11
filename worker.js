@@ -405,6 +405,7 @@ async function handleSync(request, env, cfg) {
       ok: 0,
       code: 'owner_mismatch',
       message: '另一个页面正在作为通知源',
+      worker: WORKER_VERSION,
       owner: { host: owner.host || '', since: owner.since || 0 },
       rows: await countRows(env)
     }, 409);
@@ -661,7 +662,18 @@ async function handleState(request, env, cfg) {
     });
   }
   out.sort(function (a, b) { return a.name.localeCompare(b.name, 'zh'); });
-  return json({ ok: 1, now: now, rows: out });
+
+  // 一并给出归属与近期写入状态，便于排查（令牌已校验过）
+  const owner = (await env.STATE.get('meta:owner', 'json')) || null;
+  const cfgMeta = (await env.STATE.get('meta:config', 'json')) || {};
+  return json({
+    ok: 1,
+    worker: WORKER_VERSION,
+    now: now,
+    owner: owner ? { clientId: owner.clientId || '', host: owner.host || '', since: owner.since || 0 } : null,
+    lastQuotaAt: num(cfgMeta.lastQuotaAt) || 0,
+    rows: out
+  });
 }
 
 /* ================= /reset-alerts ================= */
