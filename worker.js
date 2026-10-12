@@ -16,7 +16,7 @@
 /* Worker 版本号。页面会拿它和自身版本比对，不一致就提示"该重新部署 Worker 了" —— 
    否则改了 worker.js 却忘了部署，会表现为"功能不生效"且毫无线索。
    发新版时与 index.html 页脚的版本号保持一致。 */
-const WORKER_VERSION = '1.7.1';
+const WORKER_VERSION = '1.8.0';
 
 const DEFAULTS = {
   // 推送到某个产线达到上限/下限前多少秒开始预警
@@ -133,87 +133,47 @@ function decideAlert(prev, level) {
   return null;
 }
 
-/** 把本轮要推的条目渲染成一条消息（多条产线合并成一条，省配额也少打扰） */
-function composeMessage(items, now) {
-  const groups = new Map();
-  items.forEach(function (it) {
-    if (!groups.has(it.level)) groups.set(it.level, []);
-    groups.get(it.level).push(it);
-  });
-
-  const lines = [];
-  [1, 2, 3, 4].forEach(function (lv) {
-    const list = groups.get(lv);
-    if (!list || !list.length) return;
-    lines.push('**' + LEVEL_META[lv].icon + ' ' + LEVEL_META[lv].title + '**');
-    list.forEach(function (it) {
-      lines.push('- ' + it.text);
-    });
-    lines.push('');
-  });
-
-  const tags = [];
-  groups.forEach(function (_list, lv) {
-    const t = LEVEL_META[lv].tag;
-    if (tags.indexOf(t) < 0) tags.push(t);
-  });
-
-  const hhmm = function (d) {
-    const p = function (n) { return String(n).padStart(2, '0'); };
-    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
-  };
-
-  lines.push('_快照 ' + hhmm(new Date(now)) + ' · 数据来自电脑端页面_');
-
-  const title = items.length === 1
-    ? LEVEL_META[items[0].level].icon + ' ' + LEVEL_META[items[0].level].title + '：' + items[0].name
-    : '终末地产线预警 · ' + items.length + ' 条';
-
-  const shortParts = [];
-  [1, 2, 3, 4].forEach(function (lv) {
-    const list = groups.get(lv);
-    if (list && list.length) shortParts.push(LEVEL_META[lv].title + ' ' + list.length);
-  });
-
-  return {
-    title: title,
-    desp: lines.join('\n'),
-    short: shortParts.join(' · '),
-    tags: tags.join('|')
-  };
+/** 预计发生的具体时刻，形如 10-13 14:32 */
+function fmtMoment(ms) {
+  const d = new Date(ms);
+  const p = function (n) { return String(n).padStart(2, '0'); };
+  return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' '
+    + p(d.getHours()) + ':' + p(d.getMinutes());
 }
 
-/** 把一条产线渲染成一行动态文案（带存量与净速率，方便手机上判断轻重） */
-function describeItem(item, now) {
+/**
+ * 把一条产线渲染成一条独立消息（不再合并）。
+ * 正文只说明"发生了什么 / 什么时候发生"，不带存量、上限、净速率和快照时间。
+ */
+function composeItemMessage(item, now) {
   const row = item.row;
-  const cap = CAPS[row.region] || CAPS.gudi;
-  const region = REGION_LABEL[row.region] || '武陵';
-  const net = num(row.prod) - num(row.cons);
-  const stock = Math.round(projectStock(row, now));
-  const sign = net > 0 ? '+' : '';
-  const tail = '净 ' + sign + Math.round(net * 100) / 100 + '/分';
+  const meta = LEVEL_META[item.level];
+  const remark = typeof row.remark === 'string' ? row.remark.trim() : '';
 
-  if (item.level === 2) {
-    return row.name + '（' + region + '） 存量 ' + stock.toLocaleString('en-US')
-      + ' / ' + cap.toLocaleString('en-US') + ' — ' + tail;
-  }
-  if (item.level === 4) {
-    return row.name + '（' + region + '） 存量已归零 — ' + tail;
+  const title = meta.icon + ' ' + meta.title + '：' + row.name
+    + (remark ? '（' + remark + '）' : '');
+
+  let desp;
+  if (item.level === 1 || item.level === 3) {
+    const net = num(row.prod) - num(row.cons);
+    const remain = item.level === 1
+      ? Math.max(0, (CAPS[row.region] || CAPS.gudi) - projectStock(row, now))
+      : projectStock(row, now);
+    const mins = Math.max(0, Math.round(remain / Math.abs(net)));
+    desp = '预计 ' + fmtMoment(now + mins * 60000) + ' ' + meta.title.replace('即将', '')
+      + '（约 ' + mins + ' 分钟后）';
+  } else if (item.level === 2) {
+    desp = '仓库已填满';
+  } else {
+    desp = '物品已耗尽';
   }
 
-  // 即将爆仓 / 即将耗尽：报出剩余量与预计时间
-  const remain = item.level === 1
-    ? Math.max(0, cap - stock)
-    : stock;
-  const mins = Math.max(0, Math.round(remain / Math.abs(net)));
-  const verb = item.level === 1 ? '爆仓' : '耗尽';
-  return row.name + '（' + region + '）' + (item.level === 1 ? ' 剩余 ' : ' 存量 ')
-    + remain.toLocaleString('en-US') + ' — 约 ' + mins + ' 分钟后' + verb + '，' + tail;
+  return { title: title, desp: desp, short: desp, tags: meta.tag };
 }
 
 /* 仅供本地 worker.test.mjs 调用；Cloudflare 只使用 default 导出，多一个具名导出不影响运行 */
 export const __test = {
-  projectStock, evaluateLevel, decideAlert, composeMessage, describeItem,
+  projectStock, evaluateLevel, decideAlert, composeItemMessage, fmtMoment,
   deriveUid, resolveCredentials, effectiveConfig,
   quotaCooldown, pendingWrites
 };
@@ -894,25 +854,27 @@ async function runPatrol(env, cfg) {
     return;
   }
 
-  const items = candidates.map(function (c) {
-    return {
-      level: c.level,
-      name: c.row.name,
-      text: describeItem(c, now)
-    };
-  }).sort(function (a, b) { return a.level - b.level; });
+  // 每条物品单独推一条消息（不合并），严重等级优先
+  const ordered = candidates.slice().sort(function (a, b) { return a.level - b.level; });
+  let allOk = true;
+  let lastErr = null;
 
-  const msg = composeMessage(items, now);
-  const res = await pushServerChan(env, cfg, msg);
+  for (const c of ordered) {
+    const one = await pushServerChan(env, cfg, composeItemMessage(c, now));
+    if (!one.ok) {
+      allOk = false;
+      lastErr = one.message;
+    }
+  }
 
   // 推送结果只写回待处理的那几行（与上面的复位合并成一次批量写），
   // 不再额外维护 meta:status，否则免费额度（1000 写/天）很容易被烧光
   for (const c of candidates) {
-    if (res.ok) {
+    if (allOk) {
       c.row.alerted = c.level;
       c.row.lastError = null;
     } else {
-      c.row.lastError = res.message;
+      c.row.lastError = lastErr;
     }
     c.row.lastAttemptAt = now;
     c.row.lastPushAt = now;

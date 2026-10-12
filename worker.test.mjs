@@ -140,12 +140,13 @@ group('三、巡检与推送（走完整 cron 路径）');
   await patrol();
   eq(sentMessages.length, 1, '跨入预警后推送一次');
   ok(sentMessages[0].url === 'https://UID123.push.ft07.com/send/SCTKEY456.send', 'URL 模板占位符替换正确');
-  eq(formField(sentMessages[0].body, 'title'), '⚠ 即将爆仓：源矿', '单条消息标题');
-  ok(formField(sentMessages[0].body, 'desp').includes('⚠ 即将爆仓'), '正文含等级标签');
-  ok(formField(sentMessages[0].body, 'desp').includes('源矿（武陵）'), '正文含产物与地区');
-  ok(formField(sentMessages[0].body, 'desp').includes('分钟后爆仓'), '正文含预计爆仓时间');
+  eq(formField(sentMessages[0].body, 'title'), '⚠ 即将爆仓：源矿', '标题 = 图标 + 等级 + 物品名');
+  const d1 = formField(sentMessages[0].body, 'desp');
+  ok(/^预计 \d{2}-\d{2} \d{2}:\d{2} 爆仓（约 \d+ 分钟后）$/.test(d1), '正文 = 具体时刻 + 相对分钟：' + d1);
   eq(formField(sentMessages[0].body, 'tags'), '即将爆仓', 'tags 按等级分类');
-  ok(formField(sentMessages[0].body, 'short').length > 0, 'short 摘要非空');
+  eq(formField(sentMessages[0].body, 'short'), d1, 'short 用同一句话');
+  ok(!/存量|上限|净 /.test(d1), '正文不该再出现存量/上限/净速率：' + d1);
+  ok(!/快照/.test(d1), '正文不该再出现快照时间：' + d1);
 
   // 水位已抬到 1 → 不再推
   await patrol();
@@ -160,6 +161,7 @@ group('三、巡检与推送（走完整 cron 路径）');
   await patrol();
   eq(sentMessages.length, 2, '升级为已爆仓时再推一次');
   eq(formField(sentMessages[1].body, 'title'), '🛑 已爆仓：源矿', '已爆仓标题');
+  eq(formField(sentMessages[1].body, 'desp'), '仓库已填满', '已爆仓正文固定一句');
   eq(formField(sentMessages[1].body, 'tags'), '爆仓', '爆仓 tags');
 
   // 爆仓后长时间挂着（模拟"一天之内才删除"）——每 5 分钟巡检一次，共 6 小时
@@ -185,23 +187,60 @@ group('三、巡检与推送（走完整 cron 路径）');
   eq(sentMessages.length, 3, '复位后再次跨阈值会重新推送');
 }
 
-group('四、已耗尽与多产线聚合');
+group('四、每条物品单独一条消息（不再合并）');
 {
   reset();
-  await ENV.STATE.put('row:a', JSON.stringify(rowAt({ id: 'a', name: '源矿', region: 'wuling', prod: 0, cons: 10, stock: 0 })));
-  await ENV.STATE.put('row:b', JSON.stringify(rowAt({ id: 'b', name: '赤铜块', region: 'gudi', prod: 20, cons: 0, stock: 79900 })));
+  await ENV.STATE.put('row:a', JSON.stringify(rowAt({ id: 'a', name: '源矿', remark: '装满：液体A', region: 'wuling', prod: 0, cons: 10, stock: 0 })));
+  await ENV.STATE.put('row:b', JSON.stringify(rowAt({ id: 'b', name: '赤铜块', remark: '', region: 'gudi', prod: 20, cons: 0, stock: 79900 })));
   await patrol();
-  eq(sentMessages.length, 1, '两条产线同一轮只推一条消息');
-  eq(formField(sentMessages[0].body, 'title'), '终末地产线预警 · 2 条', '多条产线聚合标题');
-  const desp = formField(sentMessages[0].body, 'desp');
-  ok(desp.includes('已耗尽'), '聚合正文含已耗尽分组');
-  ok(desp.includes('即将爆仓'), '聚合正文含即将爆仓分组');
-  ok(desp.indexOf('即将爆仓') < desp.indexOf('已耗尽'), '分组按等级从预警到严重排序');
-  eq(formField(sentMessages[0].body, 'tags'), '即将爆仓|耗尽', '聚合 tags 去重合并');
-  ok(formField(sentMessages[0].body, 'short').includes('即将爆仓 1'), 'short 含各组数量');
+  eq(sentMessages.length, 2, '两条产线各推一条（不合并）');
+
+  const titles = sentMessages.map(s => formField(s.body, 'title'));
+  eq(titles[0], '⚠ 即将爆仓：赤铜块', '严重度低（预警）的先推，无备注则省略括号');
+  eq(titles[1], '🛑 已耗尽：源矿（装满：液体A）', '严重度高（已耗尽）的后推，带备注');
+  eq(formField(sentMessages[1].body, 'desp'), '物品已耗尽', '已耗尽正文固定一句');
+  eq(formField(sentMessages[0].body, 'tags'), '即将爆仓', '各条消息带自己的 tag');
+  eq(formField(sentMessages[1].body, 'tags'), '耗尽', '各条消息带自己的 tag');
 }
 
-group('五、推送失败时的重试与状态');
+group('五、消息文案：只要时刻，不要存量/速率/快照');
+{
+  const now = 1780000000000;   // 固定时间，便于断言具体时刻
+  const mkItem = (level, over) => ({
+    level: level,
+    row: Object.assign({
+      id: 'x', name: '源矿', remark: '液体A', region: 'wuling',
+      prod: 20, cons: 0, stock: 90000 - 2000, ts: now
+    }, over || {})
+  });
+
+  const soon = __test.composeItemMessage(mkItem(1), now);
+  eq(soon.title, '⚠ 即将爆仓：源矿（液体A）', '预警标题带备注');
+  // 距上限 2000，净 +20/分 → 100 分钟后爆仓（时刻按本地时区推导，不写死）
+  eq(soon.desp, '预计 ' + __test.fmtMoment(now + 100 * 60000) + ' 爆仓（约 100 分钟后）', '预警正文 = 具体时刻 + 分钟');
+  eq(soon.tags, '即将爆仓', '预警 tag');
+
+  const full = __test.composeItemMessage(mkItem(2), now);
+  eq(full.title, '🛑 已爆仓：源矿（液体A）', '已爆仓标题');
+  eq(full.desp, '仓库已填满', '已爆仓正文');
+
+  const dry = __test.composeItemMessage(mkItem(3, { prod: 0, cons: 10, stock: 1000 }), now);
+  eq(dry.title, '⚠ 即将耗尽：源矿（液体A）', '耗尽预警标题');
+  eq(dry.desp, '预计 ' + __test.fmtMoment(now + 100 * 60000) + ' 耗尽（约 100 分钟后）', '耗尽预警正文');
+
+  const empty = __test.composeItemMessage(mkItem(4, { prod: 0, cons: 10, stock: 0 }), now);
+  eq(empty.desp, '物品已耗尽', '已耗尽正文');
+
+  // 去掉的东西一个都不该出现
+  [soon, full, dry, empty].forEach(m => {
+    ok(!/存量|上限|净 |快照|\/分/.test(m.desp), '正文残留了被要求去掉的内容：' + m.desp);
+  });
+  const noRemark = __test.composeItemMessage(mkItem(1, { remark: '' }), now);
+  eq(noRemark.title, '⚠ 即将爆仓：源矿', '无备注时标题不带空括号');
+  ok(__test.fmtMoment(now) === '05-29 06:40' || /^\d{2}-\d{2} \d{2}:\d{2}$/.test(__test.fmtMoment(now)), '时刻格式 MM-DD HH:mm');
+}
+
+group('六、推送失败时的重试与状态');
 {
   reset();
   nextFetchResult = { ok: true, status: 200, body: '{"code":40001,"message":"bad pushkey"}' };
@@ -219,7 +258,7 @@ group('五、推送失败时的重试与状态');
   eq((await ENV.STATE.get('row:r1', 'json')).alerted, 1, '重试成功后水位抬升');
 }
 
-group('六、/sync 端点');
+group('七、/sync 端点');
 {
   reset();
   let res = await worker.fetch(postJSON('/sync', { rows: [{ id: 'x', name: '源矿', region: 'wuling', prod: 5, cons: 1, stock: 100, ts: Date.now() }] }, { 'X-Sync-Token': 'tok' }), ENV, {});
@@ -245,7 +284,7 @@ group('六、/sync 端点');
   eq((await ENV.STATE.get('row:y', 'json')).alerted, 2, '前端同步不会清掉 Worker 的提醒水位');
 }
 
-group('七、SendKey 里解析 UID');
+group('八、SendKey 里解析 UID');
 {
   eq(__test.deriveUid('sctp24339tauwt87osfuw9nyptebxxxx'), '24339', '标准 SendKey → 取出 UID');
   eq(__test.deriveUid('SCTP24339TAUWT87OSFUW9NYPtebxxxx'), '24339', '大写前缀也能解析');
@@ -273,7 +312,7 @@ group('七、SendKey 里解析 UID');
   ok(String(badKey.reason).includes('SC_UID'), '提示告知可以补一个 SC_UID');
 }
 
-group('八、只配 SendKey 时的真实推送 URL');
+group('九、只配 SendKey 时的真实推送 URL');
 {
   reset();
   // 刻意不提供 SC_UID，用一个真实的 SendKey 形态，验证地址里的 UID 是解析出来的
@@ -291,7 +330,7 @@ group('八、只配 SendKey 时的真实推送 URL');
   eq(formField(sentMessages[0].body, 'title'), '⚠ 即将爆仓：源矿', '解析 UID 后消息内容不受影响');
 }
 
-group('九、爆仓 / 耗尽 两个方向可分别开关');
+group('十、爆仓 / 耗尽 两个方向可分别开关');
 {
   const now = Date.now();
   const warn = 1800;
@@ -326,7 +365,7 @@ group('九、爆仓 / 耗尽 两个方向可分别开关');
   eq(__test.evaluateLevel(fullRow, now, warn), 1, '未传方向参数时按两个都开处理（向后兼容）');
 }
 
-group('十、方向开关走完整巡检链路');
+group('十一、方向开关走完整巡检链路');
 {
   reset();
   const mk = (o) => Object.assign({
@@ -364,7 +403,7 @@ group('十、方向开关走完整巡检链路');
   eq([cfgMeta.warnMinutes, cfgMeta.alertTypes.empty], [45, true], '只改预警窗口不会重置方向设置');
 }
 
-group('十一、/test 与 /reset-alerts');
+group('十二、/test 与 /reset-alerts');
 {
   reset();
   let res = await worker.fetch(new Request('https://w.example/test'), ENV, {});
@@ -384,7 +423,7 @@ group('十一、/test 与 /reset-alerts');
   eq((await ENV.STATE.get('row:z', 'json')).alerted, 0, '水位被清零');
 }
 
-group('十二、边界与容错');
+group('十三、边界与容错');
 {
   reset();
   let res = await worker.fetch(new Request('https://w.example/unknown'), ENV, {});
