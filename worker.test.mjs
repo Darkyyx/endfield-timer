@@ -142,7 +142,7 @@ group('三、巡检与推送（走完整 cron 路径）');
   ok(sentMessages[0].url === 'https://UID123.push.ft07.com/send/SCTKEY456.send', 'URL 模板占位符替换正确');
   eq(formField(sentMessages[0].body, 'title'), '⚠ 即将爆仓：源矿', '标题 = 图标 + 等级 + 物品名');
   const d1 = formField(sentMessages[0].body, 'desp');
-  ok(/^预计 \d{2}-\d{2} \d{2}:\d{2} 爆仓（约 \d+ 分钟后）$/.test(d1), '正文 = 具体时刻 + 相对分钟：' + d1);
+  ok(/^预计 \d{2}:\d{2} 爆仓（约 \d+ 分钟后）$/.test(d1), '正文 = 时刻 + 相对分钟（不含日期）：' + d1);
   eq(formField(sentMessages[0].body, 'tags'), '即将爆仓', 'tags 按等级分类');
   eq(formField(sentMessages[0].body, 'short'), d1, 'short 用同一句话');
   ok(!/存量|上限|净 /.test(d1), '正文不该再出现存量/上限/净速率：' + d1);
@@ -217,7 +217,8 @@ group('五、消息文案：只要时刻，不要存量/速率/快照');
   const soon = __test.composeItemMessage(mkItem(1), now);
   eq(soon.title, '⚠ 即将爆仓：源矿（液体A）', '预警标题带备注');
   // 距上限 2000，净 +20/分 → 100 分钟后爆仓（时刻按本地时区推导，不写死）
-  eq(soon.desp, '预计 ' + __test.fmtMoment(now + 100 * 60000) + ' 爆仓（约 100 分钟后）', '预警正文 = 具体时刻 + 分钟');
+  eq(soon.desp, '预计 ' + __test.fmtClock(now + 100 * 60000) + ' 爆仓（约 100 分钟后）', '预警正文 = 时刻 + 分钟，不含日期');
+  ok(/^预计 \d{2}:\d{2} 爆仓（约 \d+ 分钟后）$/.test(soon.desp), '正文不含日期：' + soon.desp);
   eq(soon.tags, '即将爆仓', '预警 tag');
 
   const full = __test.composeItemMessage(mkItem(2), now);
@@ -226,7 +227,7 @@ group('五、消息文案：只要时刻，不要存量/速率/快照');
 
   const dry = __test.composeItemMessage(mkItem(3, { prod: 0, cons: 10, stock: 1000 }), now);
   eq(dry.title, '⚠ 即将耗尽：源矿（液体A）', '耗尽预警标题');
-  eq(dry.desp, '预计 ' + __test.fmtMoment(now + 100 * 60000) + ' 耗尽（约 100 分钟后）', '耗尽预警正文');
+  eq(dry.desp, '预计 ' + __test.fmtClock(now + 100 * 60000) + ' 耗尽（约 100 分钟后）', '耗尽预警正文');
 
   const empty = __test.composeItemMessage(mkItem(4, { prod: 0, cons: 10, stock: 0 }), now);
   eq(empty.desp, '物品已耗尽', '已耗尽正文');
@@ -234,10 +235,11 @@ group('五、消息文案：只要时刻，不要存量/速率/快照');
   // 去掉的东西一个都不该出现
   [soon, full, dry, empty].forEach(m => {
     ok(!/存量|上限|净 |快照|\/分/.test(m.desp), '正文残留了被要求去掉的内容：' + m.desp);
+    ok(!/\d{1,2}-\d{1,2}/.test(m.desp), '正文残留了日期：' + m.desp);
   });
   const noRemark = __test.composeItemMessage(mkItem(1, { remark: '' }), now);
   eq(noRemark.title, '⚠ 即将爆仓：源矿', '无备注时标题不带空括号');
-  ok(__test.fmtMoment(now) === '05-29 06:40' || /^\d{2}-\d{2} \d{2}:\d{2}$/.test(__test.fmtMoment(now)), '时刻格式 MM-DD HH:mm');
+  ok(/^\d{2}:\d{2}$/.test(__test.fmtClock(now)), '时刻格式 HH:mm，不含日期：' + __test.fmtClock(now));
 }
 
 group('六、推送失败时的重试与状态');

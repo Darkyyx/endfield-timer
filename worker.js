@@ -16,7 +16,7 @@
 /* Worker 版本号。页面会拿它和自身版本比对，不一致就提示"该重新部署 Worker 了" —— 
    否则改了 worker.js 却忘了部署，会表现为"功能不生效"且毫无线索。
    发新版时与 index.html 页脚的版本号保持一致。 */
-const WORKER_VERSION = '1.8.0';
+const WORKER_VERSION = '1.8.1';
 
 const DEFAULTS = {
   // 推送到某个产线达到上限/下限前多少秒开始预警
@@ -133,12 +133,11 @@ function decideAlert(prev, level) {
   return null;
 }
 
-/** 预计发生的具体时刻，形如 10-13 14:32 */
-function fmtMoment(ms) {
+/** 只给时刻，形如 14:32 —— 日期由 App 自身的通知时间体现，不重复写 */
+function fmtClock(ms) {
   const d = new Date(ms);
   const p = function (n) { return String(n).padStart(2, '0'); };
-  return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' '
-    + p(d.getHours()) + ':' + p(d.getMinutes());
+  return p(d.getHours()) + ':' + p(d.getMinutes());
 }
 
 /**
@@ -160,7 +159,7 @@ function composeItemMessage(item, now) {
       ? Math.max(0, (CAPS[row.region] || CAPS.gudi) - projectStock(row, now))
       : projectStock(row, now);
     const mins = Math.max(0, Math.round(remain / Math.abs(net)));
-    desp = '预计 ' + fmtMoment(now + mins * 60000) + ' ' + meta.title.replace('即将', '')
+    desp = '预计 ' + fmtClock(now + mins * 60000) + ' ' + meta.title.replace('即将', '')
       + '（约 ' + mins + ' 分钟后）';
   } else if (item.level === 2) {
     desp = '仓库已填满';
@@ -173,7 +172,7 @@ function composeItemMessage(item, now) {
 
 /* 仅供本地 worker.test.mjs 调用；Cloudflare 只使用 default 导出，多一个具名导出不影响运行 */
 export const __test = {
-  projectStock, evaluateLevel, decideAlert, composeItemMessage, fmtMoment,
+  projectStock, evaluateLevel, decideAlert, composeItemMessage, fmtClock,
   deriveUid, resolveCredentials, effectiveConfig,
   quotaCooldown, pendingWrites
 };
