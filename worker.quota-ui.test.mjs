@@ -281,7 +281,61 @@ await check('额度文案只说明额度与重置时间，不再额外解释通�
   return msg;
 });
 
-console.log('\nE. Worker 版本一致性');
+console.log('\nE. 过期额度标记必须能自己解开（曾出现自我维持的死循环）');
+
+await check('页面报额度不足但 KV 无记录 → Worker 执行探测写入并纠正判断', async () => {
+  const kv = makeKV(999);
+  const env = { STATE: kv, SC_SENDKEY: 'sctp1a', WARN_SECONDS: 1800 };
+  await worker.fetch(req('/sync', body({ rows: [] })), env, {});
+  const before = kv.stats.put;
+  // 页面带着一个过期的 quotaAt 上来，且本次没有需要写入的内容
+  const res = await worker.fetch(req('/sync', body({ dirty: false, quotaAt: 1780000000000 })), env, {});
+  const j = await res.json();
+  assert(kv.stats.put > before, '未做探测写入，过期标记无法被纠正');
+  assert(j.quota === 0, '额度可用却仍报 quota=1：' + JSON.stringify(j));
+  assert(j.quotaAt === 0, 'quotaAt 未清零：' + j.quotaAt);
+  return '探测写入后纠正为 quota=0';
+});
+
+await check('探测写入失败时如实报告额度不足', async () => {
+  const kv = makeKV(999);
+  const env = { STATE: kv, SC_SENDKEY: 'sctp1a', WARN_SECONDS: 1800 };
+  await worker.fetch(req('/sync', body({ rows: [] })), env, {});
+  kv.stats.quota = kv.stats.put;      // 从此写入全部失败
+  const res = await worker.fetch(req('/sync', body({ dirty: false, quotaAt: 1780000000000 })), env, {});
+  const j = await res.json();
+  assert(j.quota === 1, '探测失败却报正常：' + JSON.stringify(j));
+  assert(j.probed === 1, '未标记为探测结果');
+  assert(j.quotaAt > 1780000000000, '未更新时间戳：' + j.quotaAt);
+  return 'reportedQuotaAt 更新为 ' + j.quotaAt;
+});
+
+await check('额度恢复后再次请求 → 标记自动清除', async () => {
+  const kv = makeKV(999);
+  const env = { STATE: kv, SC_SENDKEY: 'sctp1a', WARN_SECONDS: 1800 };
+  await worker.fetch(req('/sync', body({ rows: [] })), env, {});
+  kv.stats.quota = kv.stats.put;
+  await worker.fetch(req('/sync', body({ dirty: false, quotaAt: 1780000000000 })), env, {});   // 失败一次，写入标记
+  kv.stats.quota = 999;                                                                          // 额度恢复
+  const res = await worker.fetch(req('/sync', body({ dirty: false, quotaAt: 1780000000000 })), env, {});
+  const j = await res.json();
+  assert(j.quota === 0 && j.quotaAt === 0, '恢复后未清除标记：' + JSON.stringify(j));
+  const meta = await kv.get('meta:config', 'json');
+  assert(!meta.lastQuotaAt, 'KV 里的标记未清除：' + JSON.stringify(meta));
+  return 'quota=0，KV 标记已清';
+});
+
+await check('页面侧：success 响应会清除本地 quota 标记', async () => {
+  const withFlag = [['endfield_quota_at', '1780000000000']];
+  const { getEl, store } = boot(okReply, withFlag);
+  getEl('ntNow').listeners.click.forEach(fn => fn());
+  await new Promise(r => setTimeout(r, 80));
+  assert(!store.get('endfield_quota_at'), '本地标记未被清除：' + store.get('endfield_quota_at'));
+  assert(getEl('stats').innerHTML.includes('同步 正常'), '未回到绿灯');
+  return '本地标记已清，状态回到正常';
+});
+
+console.log('\nF. Worker 版本一致性');
 
 await check('页面与 Worker 的版本号常量保持一致', () => {
   assert(pageVersion, '未找到 PAGE_VERSION');

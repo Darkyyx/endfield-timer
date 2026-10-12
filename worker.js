@@ -16,7 +16,7 @@
 /* Worker 版本号。页面会拿它和自身版本比对，不一致就提示"该重新部署 Worker 了" —— 
    否则改了 worker.js 却忘了部署，会表现为"功能不生效"且毫无线索。
    发新版时与 index.html 页脚的版本号保持一致。 */
-const WORKER_VERSION = '1.7.0';
+const WORKER_VERSION = '1.7.1';
 
 const DEFAULTS = {
   // 推送到某个产线达到上限/下限前多少秒开始预警
@@ -532,20 +532,41 @@ async function handleSync(request, env, cfg) {
   const quotaMsg = putRes.message || delRes.message || QUOTA_MSG;
   if (quotaHit) await saveQuotaFlag(env, quotaAt);
 
-  // 只读请求（dirty=false）一个字节都没写，所以要顺带把"上次是否因额度失败"报出去，
-  // 否则页面在只读/无改动状态下会看到绿灯，误以为一切正常。
-  // 注意：额度用尽时 Worker 自己也没法把标记写进 KV（正是同一个原因），
-  // 因此页面会把上次的时间戳随请求带上来，这里只做回显。
-  const echoed = num(body && body.quotaAt);
+  // 额度状态以 KV 里的记录（meta:config.lastQuotaAt）为权威，**不再无条件相信页面的回显**。
+  // 否则会出现自我维持的死循环：页面把 localStorage 里的旧时间戳传上来 → 这里回显 →
+  // 页面又存回去 → 下次继续传……即使额度早已重置也永远解不掉。
   const cfgMeta = quotaHit ? null : await effectiveConfig(env, cfg);
-  const reportedQuotaAt = quotaHit ? quotaAt
-    : (lastQuota || echoed || (cfgMeta && cfgMeta.lastQuotaAt) || 0);
+  let reportedQuotaAt = quotaHit ? quotaAt : (lastQuota || (cfgMeta && cfgMeta.lastQuotaAt) || 0);
+
+  // 页面报着"额度不足"但 KV 里没有任何记录时，做一次探测写入来验证：
+  //   · 额度已恢复 → 探测成功，顺带把 KV 里的标记清掉，页面随即回绿
+  //   · 额度仍不足 → 探测失败，如实回 idle 状态并重新记下时间戳
+  // 代价是最多 1 次写入，只在"页面与 Worker 判断不一致"时发生。
+  const echoed = num(body && body.quotaAt);
+  let probeFailed = false;
+  if (!quotaHit && echoed && !reportedQuotaAt) {
+    const probe = await safePut(env, [{
+      key: 'meta:config',
+      value: JSON.stringify({
+        warnMinutes: num(cfg && cfg.WARN_SECONDS) > 0 ? Math.round(num(cfg.WARN_SECONDS) / 60) : 30,
+        alertTypes: (cfgMeta && cfgMeta.types) || { full: true, empty: true },
+        lastQuotaAt: 0,
+        updatedAt: Date.now()
+      })
+    }]);
+    if (probe.quota) {
+      probeFailed = true;
+      reportedQuotaAt = probe.at || Date.now();
+      await saveQuotaFlag(env, reportedQuotaAt);
+    }
+  }
 
   return json({
     ok: 1,                              // 请求本身处理成功；额度问题用 quota 字段单独表达
     worker: WORKER_VERSION,             // 让页面能发现"Worker 忘了重新部署"
     quota: reportedQuotaAt ? 1 : 0,     // 含"这次没写、但已知额度不足"的情况
     quotaAt: reportedQuotaAt,
+    probed: probeFailed ? 1 : 0,
     message: reportedQuotaAt ? quotaMsg : undefined,
     writes: rowPuts.length + missPuts.length,
     rows: written,
