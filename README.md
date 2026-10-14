@@ -109,9 +109,10 @@ node worker.owner.test.mjs    # 数据源归属、换域名导入流程、只读
 node worker.quota.test.mjs    # KV 每日写入额度预算（防止再把额度写爆）
 node worker.quota-ui.test.mjs # 额度用尽时的状态上报与页面红灯
 node worker.hud.test.mjs      # 右上角状态计数、同步灯与文案
+node worker.font.test.mjs     # 显示设置（字体仅存本机）与预警数字配色
 ```
 
-五个脚本都不需要任何依赖。
+六个脚本都不需要任何依赖。
 
 ---
 

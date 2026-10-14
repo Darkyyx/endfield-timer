@@ -86,7 +86,7 @@ function statsOf(getEl) {
   let m;
   while ((m = re.exec(h)) !== null) {
     const label = (m[1].match(/<span class="k">([\s\S]*?)<\/span>/) || [])[1] || '';
-    const val = (m[1].match(/<b>([\s\S]*?)<\/b>/) || [])[1] || '';
+    const val = (m[1].match(/<b[^>]*>([\s\S]*?)<\/b>/) || [])[1] || '';
     const txt = (label.replace(/<[^>]*>/g, '').trim() + ' ' + val.trim()).trim();
     if (txt) out.push(txt);
   }
@@ -152,7 +152,7 @@ await check('预警计数跟随设置的预警窗口', () => {
 await check('数字独立成块，不会与相邻数字连读', () => {
   const { getEl } = boot([{ id: 'a', name: 'X', prod: 0, cons: 0, stock: 0 }]);
   const h = rawHud(getEl);
-  assert(/<span class="k">正常<\/span><b>\d+<\/b>/.test(h), '结构不对：' + h);
+  assert(/<span class="k">正常<\/span><b[^>]*>\d+<\/b>/.test(h), '结构不对：' + h);
   assert(!/<\/b>\d/.test(h), '出现数字紧接数字：' + h);
   return '结构正确';
 });

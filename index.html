@@ -20,6 +20,12 @@
     --green-bright:#a8e86a;
     --red-dark:#a83b36;
     --mono:ui-monospace,"SF Mono","Cascadia Mono",Consolas,"Liberation Mono",monospace;
+    /* 字体顺序：英文字体在前、中文字体在后，最后回落到原有默认。
+       CSS 回退按"字符"生效，所以英文/数字走英文字体，中文自动落到中文字体。
+       这两项由「显示设置」面板覆盖，只存本机。 */
+    --font-en:"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --font-zh:"Noto Sans SC";
+    --font-body:var(--font-en),var(--font-zh),sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html{color-scheme:dark}
@@ -27,7 +33,7 @@
     min-height:100vh;
     background:var(--bg);
     color:var(--txt);
-    font-family:"Barlow","Noto Sans SC",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    font-family:var(--font-body);
     padding:34px 26px 90px;
     -webkit-font-smoothing:antialiased;
     overflow-x:hidden;
@@ -91,6 +97,9 @@
   }
   .stats .ok b{color:#c3ccd4}
   .stats .warn b{color:var(--yellow)}
+  /* 预警为 0 时与正常同色；包含已爆仓/已耗尽时转红 */
+  .stats .warn b.zero{color:#c3ccd4}
+  .stats .warn b.crit{color:var(--red)}
 
   /* ============ 面板 ============ */
   .panel{
@@ -532,6 +541,25 @@
     </div>
   </div>
 
+  <details class="ntPanel" id="fontPanel">
+    <summary><span class="sumDot"></span>显示设置 · FONT</summary>
+    <div class="ntBody">
+      <div class="ntGrid">
+        <label>
+          <span class="k">中文字体</span>
+          <input type="text" id="fnZh" placeholder="留空 = 使用默认" autocomplete="off" spellcheck="false">
+        </label>
+        <label>
+          <span class="k">英文字体</span>
+          <input type="text" id="fnEn" placeholder="留空 = 使用默认" autocomplete="off" spellcheck="false">
+        </label>
+      </div>
+      <div class="ntActions">
+        <span class="ntMsg">留空即用现在的字体 · 回车或失焦才应用 · 只保存在本机，不同步到 Worker</span>
+      </div>
+    </div>
+  </details>
+
   <details class="ntPanel" id="ntPanel" data-state="off">
     <summary><span class="sumDot"></span>通知设置 · SERVERCHAN PUSH</summary>
     <div class="ntBody">
@@ -583,7 +611,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.9.1</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.10.0</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -597,7 +625,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.9.1';
+  const PAGE_VERSION = '1.10.0';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1780,6 +1808,60 @@
     }
   }
 
+  /* ================= 显示设置（字体，仅存本机） ================= */
+  const FONT_KEY = 'endfield_font_v1';
+  /* 实际生效顺序：英文字体在前、中文字体在后。
+     CSS 的回退是按"字符"找第一个包含该字符的字体，所以英文/数字走英文字体，
+     中文会自动落到中文字体——这也是中文字体放在配置后面的原因。 */
+  const DEFAULT_EN = '"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif';
+  const DEFAULT_ZH = '"Noto Sans SC"';
+
+  function readFonts() {
+    try {
+      const o = JSON.parse(localStorage.getItem(FONT_KEY) || 'null');
+      return {
+        en: o && typeof o.en === 'string' ? o.en : '',
+        zh: o && typeof o.zh === 'string' ? o.zh : ''
+      };
+    } catch (e) {
+      return { en: '', zh: '' };
+    }
+  }
+
+  function applyFonts(cfg) {
+    const root = document.documentElement;
+    if (!root || !root.style || typeof root.style.setProperty !== 'function') return;
+    root.style.setProperty('--font-en', cfg.en || DEFAULT_EN);
+    root.style.setProperty('--font-zh', cfg.zh || DEFAULT_ZH);
+  }
+
+  (function initFonts() {
+    const zhEl = document.getElementById('fnZh');
+    const enEl = document.getElementById('fnEn');
+    const cfg = readFonts();
+    zhEl.value = cfg.zh;
+    enEl.value = cfg.en;
+    applyFonts(cfg);
+
+    // 回车或失焦才应用；只写本机 localStorage，不参与 Worker 同步。
+    // 每次只提交"失焦的那个框"，另一个框用已保存的值，避免把没提交的输入带上。
+    function commit(which) {
+      const saved = readFonts();
+      const next = which === 'zh'
+        ? { zh: zhEl.value.trim(), en: saved.en }
+        : { en: enEl.value.trim(), zh: saved.zh };
+      applyFonts(next);
+      try { localStorage.setItem(FONT_KEY, JSON.stringify(next)); } catch (e) { /* 忽略 */ }
+    }
+    zhEl.addEventListener('blur', function () { commit('zh'); });
+    enEl.addEventListener('blur', function () { commit('en'); });
+    [zhEl, enEl].forEach(function (el) {
+      el.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); el.blur(); }   // blur 会触发 commit
+      });
+    });
+  })();
+
   /**
    * 右上角统计：只分「正常」与「预警」两类。
    * 预警 = 进入预警窗口（即将爆仓/即将耗尽）以及已爆仓/已耗尽；产销平衡算正常。
@@ -1789,11 +1871,11 @@
     const m = notify && notify.warnMinutes ? notify.warnMinutes() : 0;
     const win = (m > 0 ? m : 30) * 60;
 
-    let normal = 0, warn = 0;
+    let normal = 0, warn = 0, crit = false;
     rows.forEach(function (r) {
       const c = compute(r);
-      // 已爆仓、已耗尽也计入预警
-      if (c.state === 'full' || c.state === 'empty') { warn++; return; }
+      // 已爆仓、已耗尽也计入预警，并且让"预警"这一项变红
+      if (c.state === 'full' || c.state === 'empty') { warn++; crit = true; return; }
       if (c.state === 'filling' || c.state === 'draining') {
         if (c.seconds < win) warn++; else normal++;
         return;
@@ -1803,7 +1885,8 @@
 
     statsEl.innerHTML =
       '<span class="ok"><span class="k">正常</span><b>' + normal + '</b></span>' +
-      '<span class="warn"><span class="k">预警</span><b>' + warn + '</b></span>' +
+      '<span class="warn"><span class="k">预警</span><b class="' + (warn === 0 ? 'zero' : (crit ? 'crit' : '')) + '">'
+        + warn + '</b></span>' +
       (notify ? notify.hudHtml() : '');
   }
 
