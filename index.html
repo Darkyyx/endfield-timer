@@ -29,8 +29,10 @@
        Barlow 放在最前是为了页面原本的观感，机器上没装就自然跳过。 */
     --font-en:"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
     /* --mono-user 供数字区域使用（倒计时、数字框、HUD、页脚等 14 处）。
-       全空时就是原来那套等宽字体栈，保持改造前的观感。 */
-    --mono-user:ui-monospace,"Cascadia Mono",Consolas,monospace;
+       注意这些位置也含中文（h1 span、.hint、面板标题），所以中文字体链必须跟在后面：
+       只写等宽字体的话，汉字会落到 monospace 通用族的中文兜底（Windows 上是点阵宋体，很难看）。
+       ui-monospace 只有 Safari 认，其他浏览器会跳过（它不会作为关键字在字体列表里展开）。 */
+    --mono-user:ui-monospace,"Cascadia Mono",Consolas,"Noto Sans SC","Microsoft YaHei","PingFang SC",monospace;
     --font-body:var(--font-zh),var(--font-en),sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0}
@@ -642,7 +644,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.11.3</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.11.4</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -656,7 +658,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.11.3';
+  const PAGE_VERSION = '1.11.4';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1846,7 +1848,7 @@
      会一路回退到通用 sans-serif，中文观感明显发虚（与 CSS :root 里的值保持一致）。 */
   const DEFAULT_ZH = '"Noto Sans SC","Microsoft YaHei","PingFang SC","Hiragino Sans GB","Source Han Sans SC","WenQuanYi Micro Hei",sans-serif';
   const DEFAULT_LATIN = '"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif';
-  const DEFAULT_MONO = 'ui-monospace,"Cascadia Mono",Consolas,monospace';
+  const DEFAULT_MONO = 'ui-monospace,"Cascadia Mono",Consolas,"Noto Sans SC","Microsoft YaHei","PingFang SC",monospace';
 
   /**
    * 把用户输入的字族名安全地拼成 CSS 值。

@@ -159,12 +159,23 @@ await check('用逗号写完整字体栈时原样保留', () => {
   return cssVars['--font-en'];
 });
 
-await check('全空时数字区回到原默认等宽栈（不被 Barlow 接管）', () => {
+await check('全空时数字区回到默认等宽栈，且带中文字体链（不被 Barlow 接管）', () => {
   const { cssVars } = boot([]);
   const mono = cssVars['--mono-user'] || '';
   assert(/Cascadia Mono/.test(mono), '数字默认栈不对：' + mono);
   assert(!/Barlow/.test(mono), '数字区不该被 Barlow 接管：' + mono);
+  // 这些位置也含中文（h1 span、.hint、面板标题），缺中文链会掉到 monospace 通用族的点阵宋体
+  assert(/Microsoft YaHei/.test(mono), '默认数字栈缺少中文字体链：' + mono);
+  assert(/monospace$/.test(mono), '结尾应是等宽通用族：' + mono);
   return mono;
+});
+
+await check('CSS 与 JS 的默认字体栈完全一致（避免刷新瞬间观感跳变）', () => {
+  const cssMono = (html.match(/--mono-user:([^;]+);/) || [])[1] || '';
+  const jsMono = (code.match(/const DEFAULT_MONO = '([^']+)'/) || [])[1] || '';
+  assert(cssMono && jsMono, '未找到默认等宽栈');
+  assert(cssMono === jsMono, '不一致：\n  CSS=' + cssMono + '\n  JS =' + jsMono);
+  return jsMono;
 });
 
 await check('数字区域已全部改用 --mono-user', () => {
