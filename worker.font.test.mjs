@@ -16,8 +16,10 @@ function makeEl(tag) {
       toggle(c, on) { on ? this._s.add(c) : this._s.delete(c); },
       contains(c) { return this._s.has(c); }
     },
-    children: [], listeners: {},
+    children: [], listeners: {}, attrs: {},
     value: '', textContent: '', innerHTML: '', className: '',
+    setAttribute(k, v) { this.attrs[k] = String(v); },
+    getAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; },
     readOnly: false, tabIndex: 0, disabled: false, checked: false,
     addEventListener(t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); },
     removeEventListener() {}, appendChild(c) { this.children.push(c); return c; },
@@ -246,6 +248,42 @@ await check('优先级持久化，且非法值回落到英文优先', () => {
   assert(mono.indexOf('ZhFont') >= 0 && mono.indexOf('ZhFont') < mono.indexOf('EnFont'), '未恢复中文优先：' + mono);
   assert(restored.getEl('fnPriority').value === 'zh', '下拉框未回填');
   return '已持久化并回填';
+});
+
+await check('显示设置小圆点：任一字体被指定就变绿', () => {
+  const state = (rows, pre) => boot(rows || [], pre).getEl('fontPanel').getAttribute('data-state');
+  assert(state([], null) === 'off', '两个都空时不该变绿，实际：' + state([], null));
+
+  const onlyZh = boot([]);
+  onlyZh.getEl('fnZh').value = 'Microsoft YaHei';
+  onlyZh.getEl('fnZh').listeners.blur.forEach(fn => fn());
+  assert(onlyZh.getEl('fontPanel').getAttribute('data-state') === 'ok', '只填中文应变绿');
+
+  const onlyEn = boot([]);
+  onlyEn.getEl('fnEn').value = 'Consolas';
+  onlyEn.getEl('fnEn').listeners.blur.forEach(fn => fn());
+  assert(onlyEn.getEl('fontPanel').getAttribute('data-state') === 'ok', '只填英文应变绿');
+
+  // 清空后应回退
+  onlyEn.getEl('fnEn').value = '';
+  onlyEn.getEl('fnEn').listeners.blur.forEach(fn => fn());
+  assert(onlyEn.getEl('fontPanel').getAttribute('data-state') === 'off', '清空后应恢复灰色');
+  return '空=off，任一填写=ok';
+});
+
+await check('小圆点不受"字体优先级"影响', () => {
+  const b = boot([]);
+  // 只有优先级被改过（两个字体仍为空）→ 不该变绿
+  b.getEl('fnPriority').value = 'zh';
+  b.getEl('fnPriority').listeners.change.forEach(fn => fn());
+  assert(b.getEl('fontPanel').getAttribute('data-state') === 'off', '仅改优先级不该变绿');
+
+  // 恢复启动态并确认绿的判据只来自两个字体框
+  const withZh = boot([], [['endfield_font_v1', JSON.stringify({ zh: 'SimSun', en: '', priority: 'zh' })]]);
+  assert(withZh.getEl('fontPanel').getAttribute('data-state') === 'ok', '启动时应按已存字体判断');
+  const withNone = boot([], [['endfield_font_v1', JSON.stringify({ zh: '', en: '', priority: 'zh' })]]);
+  assert(withNone.getEl('fontPanel').getAttribute('data-state') === 'off', '两项为空时即使有优先级也是灰的');
+  return '优先级不参与判断';
 });
 
 await check('优先级下拉框只有两个选项，且无多余说明文字', () => {
