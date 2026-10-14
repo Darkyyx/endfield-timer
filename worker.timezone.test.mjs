@@ -261,31 +261,49 @@ await check('/sync 响应带回 timeZone 与 quotaReset', async () => {
 
 console.log('\nG. 页面侧两级下拉框');
 
-await check('有两个下拉框：地区 + 城市', () => {
+await check('有两个下拉框：地区 + 城市，且都是中文地区名', () => {
   assert(/id="ntTzRegion"/.test(html), '缺少地区下拉框');
   assert(/id="ntTzCity"/.test(html), '缺少城市下拉框');
-  return 'ntTzRegion + ntTzCity';
+  const src = html.slice(html.indexOf('const TZ_CURATED'), html.indexOf('const TZ_ALIAS'));
+  ['亚洲', '欧洲', '美洲', '大洋洲', '非洲', 'UTC', '南极洲'].forEach(r => {
+    assert(src.indexOf('      ' + r + ': [') >= 0, '缺少中文地区 ' + r);
+  });
+  ['Asia', 'Europe', 'America', 'Oceania', 'Africa', 'Pacific'].forEach(r => {
+    assert(src.indexOf('      ' + r + ': [') < 0, '仍残留英文地区名 ' + r);
+  });
+  return '亚洲/欧洲/美洲/大洋洲/非洲/UTC/南极洲';
 });
 
-await check('预警时间、地区、城市在同一行（都是普通格子），地址与令牌独占整行', () => {
-  const iWideUrl = html.indexOf('class="wide">\n          <span class="k">Worker 地址');
+await check('预警时间与地区、城市相邻（同一行），地址与令牌不再独占整行', () => {
   const iWarn = html.indexOf('id="ntWarn"');
   const iRegion = html.indexOf('id="ntTzRegion"');
   const iCity = html.indexOf('id="ntTzCity"');
-  assert(iWarn < iRegion && iRegion < iCity, '顺序应为 预警时间 → 地区 → 城市');
-  assert(iWarn - iRegion < 0 && iCity - iWarn < 1200, '三者应当相邻（同一行）');
-  // 地址与令牌带 wide 类，独占整行
-  const wideCount = (html.match(/class="wide"/g) || []).length;
-  assert(wideCount === 2, 'wide 应恰好两个（地址、令牌），实际 ' + wideCount);
-  assert(/\.ntGrid \.wide\{grid-column:1\/-1\}/.test(html), '缺少 wide 的样式规则');
-  return '地址/令牌整行，预警+地区+城市一行';
+  const iUrl = html.indexOf('id="ntUrl"');
+  const iToken = html.indexOf('id="ntToken"');
+  assert(iWarn > 0 && iRegion > iWarn && iCity > iRegion, '顺序应为 预警时间 → 地区 → 城市');
+  assert(iCity - iWarn < 1200, '三者应当相邻（同一行）');
+  assert(iUrl < iToken && iToken < iWarn, '地址与令牌应在前面且相邻');
+  assert(!/class="wide"/.test(html), '地址/令牌不该再独占整行');
+  assert(!/\.ntGrid \.wide\{/.test(html), 'wide 样式规则应已移除');
+  return '地址+令牌一行；预警时间+地区+城市一行';
 });
 
-await check('时区用 IANA 标识符，不再是数字偏移', () => {
-  const src = html.slice(html.indexOf('const TZ_DEFAULT'), html.indexOf('function normalizeUrl'));
-  assert(/TZ_DEFAULT = 'Asia\/Shanghai'/.test(src), '默认时区应为 Asia/Shanghai');
-  assert(/Intl\.supportedValuesOf\('timeZone'\)/.test(src), '未从浏览器补全时区列表');
-  return 'Asia/Shanghai + supportedValuesOf 补全';
+await check('时区用 IANA 现行规范标识符，且不含废弃别名', () => {
+  const src = html.slice(html.indexOf('const TZ_CURATED'), html.indexOf('const TZ_ALIAS'));
+  assert(/TZ_DEFAULT = 'Asia\/Shanghai'/.test(html), '默认时区应为 Asia/Shanghai');
+  assert(/Asia\/Kolkata/.test(src), '应使用现行规范名 Asia/Kolkata');
+  assert(/Europe\/Kyiv/.test(src), '应使用现行规范名 Europe/Kyiv');
+  assert(/Asia\/Kathmandu/.test(src), '应使用现行规范名 Asia/Kathmandu');
+  assert(/Asia\/Ho_Chi_Minh/.test(src), '应使用现行规范名 Asia/Ho_Chi_Minh');
+  const banned = ['Asia/Calcutta', 'Asia/Katmandu', 'Asia/Rangoon', 'Asia/Saigon', 'Europe/Kiev',
+    'America/Godthab', 'Atlantic/Faeroe', 'Africa/Asmera', 'Pacific/Ponape', 'Pacific/Truk'];
+  banned.forEach(b => assert(src.indexOf("'" + b + "'") < 0, '仍在使用废弃别名 ' + b));
+  // 全部标识符必须两段式或三段式的 Area/City 形态
+  const ids = [...src.matchAll(/'([A-Za-z]+\/[A-Za-z0-9_+\-]+)'/g)].map(m => m[1]);
+  assert(ids.length > 380, '标识符数量过少：' + ids.length);
+  assert(ids.every(id => /^[A-Za-z]+\/[A-Za-z0-9_+\-]+$/.test(id)), '存在形态不合法的标识符');
+  assert(ids.every(id => !/^(亚洲|欧洲|美洲|非洲|大洋洲|南极洲)\//.test(id)), '中文地区名污染了标识符');
+  return ids.length + ' 个标识符，全部为现行规范名';
 });
 
 await check('页面把 timeZone 标识符放进同步载荷', () => {

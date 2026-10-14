@@ -456,9 +456,7 @@
   .ntPanel[data-state="save"] .sumDot{background:var(--yellow)}
 
   .ntBody{padding:20px;display:flex;flex-direction:column;gap:16px}
-  .ntGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px 20px}
-  /* 占满整行：地址、令牌这类长输入单独一行，避免被挤窄 */
-  .ntGrid .wide{grid-column:1/-1}
+  .ntGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px 20px}
   .ntGrid label{display:block}
   .ntGrid .k{
     display:block;font-size:12.5px;color:var(--dim);
@@ -606,12 +604,12 @@
     <summary><span class="sumDot"></span>通知设置 · NOTIFICATION</summary>
     <div class="ntBody">
       <div class="ntGrid">
-        <label class="wide">
+        <label>
           <span class="k">Worker 地址</span>
           <input type="text" id="ntUrl" placeholder="https://xxx.workers.dev" autocomplete="off" spellcheck="false">
           <span class="tip">在 Cloudflare 部署的 Worker 地址</span>
         </label>
-        <label class="wide">
+        <label>
           <span class="k">同步令牌</span>
           <input type="text" id="ntToken" placeholder="与 Worker 的 SYNC_TOKEN 一致" autocomplete="off" spellcheck="false">
           <span class="tip">防止未经授权的访问</span>
@@ -663,7 +661,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.13.0</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.14.0</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -677,7 +675,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.13.0';
+  const PAGE_VERSION = '1.14.0';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1259,64 +1257,185 @@
 
     /* ---------- 时区：两级下拉（地区 → 城市），值是 IANA 标识符 ---------- */
     const TZ_DEFAULT = 'Asia/Shanghai';
-    /* 常用城市给中文名，好认；其余从浏览器支持的时区里补全，
-       保证列表里出现的每一项都能被 Intl 解析（不同浏览器 ICU 版本可能缺少个别城市）。 */
+    /* 地区 → 城市。第二项是完整 IANA 规范标识符（不用 Calcutta/Kiev 等废弃别名）。
+       常用城市已译成中文，其余保留 IANA 城市名（下划线转空格）。
+       共 7 个地区 417 个城市，取自 Intl.supportedValuesOf('timeZone')。 */
     const TZ_CURATED = {
-      Asia: [
-        ['上海', 'Asia/Shanghai'], ['香港', 'Asia/Hong_Kong'], ['台北', 'Asia/Taipei'],
-        ['东京', 'Asia/Tokyo'], ['首尔', 'Asia/Seoul'], ['新加坡', 'Asia/Singapore'],
-        ['曼谷', 'Asia/Bangkok'], ['雅加达', 'Asia/Jakarta'], ['马尼拉', 'Asia/Manila'],
-        ['河内', 'Asia/Ho_Chi_Minh'], ['吉隆坡', 'Asia/Kuala_Lumpur'], ['仰光', 'Asia/Yangon'],
-        ['迪拜', 'Asia/Dubai'], ['卡拉奇', 'Asia/Karachi'], ['达卡', 'Asia/Dhaka'],
-        ['新德里', 'Asia/Kolkata'], ['加德满都', 'Asia/Kathmandu'], ['塔什干', 'Asia/Tashkent'],
-        ['阿拉木图', 'Asia/Almaty'], ['德黑兰', 'Asia/Tehran'], ['巴格达', 'Asia/Baghdad'],
-        ['利雅得', 'Asia/Riyadh'], ['伊斯坦布尔', 'Europe/Istanbul'], ['叶卡捷琳堡', 'Asia/Yekaterinburg'],
-        ['新西伯利亚', 'Asia/Novosibirsk'], ['伊尔库茨克', 'Asia/Irkutsk'],
-        ['雅库茨克', 'Asia/Yakutsk'], ['符拉迪沃斯托克', 'Asia/Vladivostok'],
-        ['马加丹', 'Asia/Magadan'], ['堪察加', 'Asia/Kamchatka']
+      亚洲: [
+        ['阿克套', 'Asia/Aqtau'], ['阿克托别', 'Asia/Aqtobe'], ['阿拉木图', 'Asia/Almaty'],
+        ['阿纳德尔', 'Asia/Anadyr'], ['阿什哈巴德', 'Asia/Ashgabat'], ['阿特劳', 'Asia/Atyrau'],
+        ['埃里温', 'Asia/Yerevan'], ['安曼', 'Asia/Amman'], ['澳门', 'Asia/Macau'],
+        ['巴尔纳乌尔', 'Asia/Barnaul'], ['巴格达', 'Asia/Baghdad'], ['巴库', 'Asia/Baku'],
+        ['贝鲁特', 'Asia/Beirut'], ['比什凯克', 'Asia/Bishkek'], ['查亚普拉', 'Asia/Jayapura'],
+        ['赤塔', 'Asia/Chita'], ['达卡', 'Asia/Dhaka'], ['大马士革', 'Asia/Damascus'],
+        ['德黑兰', 'Asia/Tehran'], ['迪拜', 'Asia/Dubai'], ['帝力', 'Asia/Dili'],
+        ['第比利斯', 'Asia/Tbilisi'], ['东京', 'Asia/Tokyo'], ['杜尚别', 'Asia/Dushanbe'],
+        ['多哈', 'Asia/Qatar'], ['鄂木斯克', 'Asia/Omsk'], ['法马古斯塔', 'Asia/Famagusta'],
+        ['符拉迪沃斯托克', 'Asia/Vladivostok'], ['古晋', 'Asia/Kuching'], ['汉德加', 'Asia/Khandyga'],
+        ['胡志明市', 'Asia/Ho_Chi_Minh'], ['吉隆坡', 'Asia/Kuala_Lumpur'], ['加德满都', 'Asia/Kathmandu'],
+        ['加尔各答', 'Asia/Kolkata'], ['加沙', 'Asia/Gaza'], ['金边', 'Asia/Phnom_Penh'],
+        ['喀布尔', 'Asia/Kabul'], ['卡拉奇', 'Asia/Karachi'], ['堪察加', 'Asia/Kamchatka'],
+        ['科布多', 'Asia/Hovd'], ['科伦坡', 'Asia/Colombo'], ['科斯塔奈', 'Asia/Qostanay'],
+        ['科威特城', 'Asia/Kuwait'], ['克拉斯诺亚尔斯克', 'Asia/Krasnoyarsk'], ['克孜勒奥尔达', 'Asia/Qyzylorda'],
+        ['坤甸', 'Asia/Pontianak'], ['利雅得', 'Asia/Riyadh'], ['马加丹', 'Asia/Magadan'],
+        ['马尼拉', 'Asia/Manila'], ['马斯喀特', 'Asia/Muscat'], ['麦纳麦', 'Asia/Bahrain'],
+        ['曼谷', 'Asia/Bangkok'], ['尼科西亚', 'Asia/Nicosia'], ['平壤', 'Asia/Pyongyang'],
+        ['撒马尔罕', 'Asia/Samarkand'], ['萨哈林', 'Asia/Sakhalin'], ['上海', 'Asia/Shanghai'],
+        ['首尔', 'Asia/Seoul'], ['斯里巴加湾', 'Asia/Brunei'], ['塔什干', 'Asia/Tashkent'],
+        ['台北', 'Asia/Taipei'], ['廷布', 'Asia/Thimphu'], ['托木斯克', 'Asia/Tomsk'],
+        ['万象', 'Asia/Vientiane'], ['望加锡', 'Asia/Makassar'], ['乌拉尔', 'Asia/Oral'],
+        ['乌兰巴托', 'Asia/Ulaanbaatar'], ['乌鲁木齐', 'Asia/Urumqi'], ['乌斯季涅拉', 'Asia/Ust-Nera'],
+        ['希伯伦', 'Asia/Hebron'], ['香港', 'Asia/Hong_Kong'], ['新加坡', 'Asia/Singapore'],
+        ['新库兹涅茨克', 'Asia/Novokuznetsk'], ['新西伯利亚', 'Asia/Novosibirsk'], ['雅加达', 'Asia/Jakarta'],
+        ['雅库茨克', 'Asia/Yakutsk'], ['亚丁', 'Asia/Aden'], ['仰光', 'Asia/Yangon'],
+        ['耶路撒冷', 'Asia/Jerusalem'], ['叶卡捷琳堡', 'Asia/Yekaterinburg'], ['伊尔库茨克', 'Asia/Irkutsk'],
+        ['中科雷姆斯克', 'Asia/Srednekolymsk']
       ],
-      Europe: [
-        ['伦敦', 'Europe/London'], ['都柏林', 'Europe/Dublin'], ['里斯本', 'Europe/Lisbon'],
-        ['巴黎', 'Europe/Paris'], ['柏林', 'Europe/Berlin'], ['罗马', 'Europe/Rome'],
-        ['马德里', 'Europe/Madrid'], ['阿姆斯特丹', 'Europe/Amsterdam'], ['布鲁塞尔', 'Europe/Brussels'],
-        ['维也纳', 'Europe/Vienna'], ['布拉格', 'Europe/Prague'], ['华沙', 'Europe/Warsaw'],
-        ['斯德哥尔摩', 'Europe/Stockholm'], ['奥斯陆', 'Europe/Oslo'], ['哥本哈根', 'Europe/Copenhagen'],
-        ['赫尔辛基', 'Europe/Helsinki'], ['雅典', 'Europe/Athens'], ['布加勒斯特', 'Europe/Bucharest'],
-        ['基辅', 'Europe/Kyiv'], ['莫斯科', 'Europe/Moscow'], ['明斯克', 'Europe/Minsk']
+      欧洲: [
+        ['阿姆斯特丹', 'Europe/Amsterdam'], ['阿斯特拉罕', 'Europe/Astrakhan'], ['安道尔', 'Europe/Andorra'],
+        ['奥斯陆', 'Europe/Oslo'], ['巴黎', 'Europe/Paris'], ['百慕大', 'Atlantic/Bermuda'],
+        ['柏林', 'Europe/Berlin'], ['贝尔格莱德', 'Europe/Belgrade'], ['比辛根', 'Europe/Busingen'],
+        ['波德戈里察', 'Europe/Podgorica'], ['布达佩斯', 'Europe/Budapest'], ['布加勒斯特', 'Europe/Bucharest'],
+        ['布拉迪斯拉发', 'Europe/Bratislava'], ['布拉格', 'Europe/Prague'], ['布鲁塞尔', 'Europe/Brussels'],
+        ['地拉那', 'Europe/Tirane'], ['都柏林', 'Europe/Dublin'], ['法罗群岛', 'Atlantic/Faroe'],
+        ['梵蒂冈', 'Europe/Vatican'], ['伏尔加格勒', 'Europe/Volgograd'], ['哥本哈根', 'Europe/Copenhagen'],
+        ['根西', 'Europe/Guernsey'], ['赫尔辛基', 'Europe/Helsinki'], ['华沙', 'Europe/Warsaw'],
+        ['基辅', 'Europe/Kyiv'], ['基洛夫', 'Europe/Kirov'], ['基希讷乌', 'Europe/Chisinau'],
+        ['加里宁格勒', 'Europe/Kaliningrad'], ['加那利群岛', 'Atlantic/Canary'], ['朗伊尔城', 'Arctic/Longyearbyen'],
+        ['雷克雅未克', 'Atlantic/Reykjavik'], ['里加', 'Europe/Riga'], ['里斯本', 'Europe/Lisbon'],
+        ['卢布尔雅那', 'Europe/Ljubljana'], ['卢森堡', 'Europe/Luxembourg'], ['伦敦', 'Europe/London'],
+        ['罗马', 'Europe/Rome'], ['马德拉', 'Atlantic/Madeira'], ['马德里', 'Europe/Madrid'],
+        ['马恩岛', 'Europe/Isle_of_Man'], ['马耳他', 'Europe/Malta'], ['玛丽港', 'Europe/Mariehamn'],
+        ['明斯克', 'Europe/Minsk'], ['摩纳哥', 'Europe/Monaco'], ['莫斯科', 'Europe/Moscow'],
+        ['南乔治亚', 'Atlantic/South_Georgia'], ['萨格勒布', 'Europe/Zagreb'], ['萨拉热窝', 'Europe/Sarajevo'],
+        ['萨拉托夫', 'Europe/Saratov'], ['萨马拉', 'Europe/Samara'], ['圣赫勒拿', 'Atlantic/St_Helena'],
+        ['圣马力诺', 'Europe/San_Marino'], ['斯德哥尔摩', 'Europe/Stockholm'], ['斯科普里', 'Europe/Skopje'],
+        ['斯坦利', 'Atlantic/Stanley'], ['苏黎世', 'Europe/Zurich'], ['索非亚', 'Europe/Sofia'],
+        ['塔林', 'Europe/Tallinn'], ['瓦杜兹', 'Europe/Vaduz'], ['维尔纽斯', 'Europe/Vilnius'],
+        ['维也纳', 'Europe/Vienna'], ['乌里扬诺夫斯克', 'Europe/Ulyanovsk'], ['辛菲罗波尔', 'Europe/Simferopol'],
+        ['雅典', 'Europe/Athens'], ['亚速尔群岛', 'Atlantic/Azores'], ['泽西', 'Europe/Jersey'],
+        ['直布罗陀', 'Europe/Gibraltar'], ['Cape Verde', 'Atlantic/Cape_Verde'], ['Istanbul', 'Europe/Istanbul']
       ],
-      America: [
-        ['纽约', 'America/New_York'], ['多伦多', 'America/Toronto'], ['芝加哥', 'America/Chicago'],
-        ['墨西哥城', 'America/Mexico_City'], ['丹佛', 'America/Denver'], ['菲尼克斯', 'America/Phoenix'],
-        ['洛杉矶', 'America/Los_Angeles'], ['温哥华', 'America/Vancouver'],
-        ['安克雷奇', 'America/Anchorage'], ['檀香山', 'Pacific/Honolulu'],
-        ['圣保罗', 'America/Sao_Paulo'], ['布宜诺斯艾利斯', 'America/Argentina/Buenos_Aires'],
-        ['圣地亚哥', 'America/Santiago'], ['利马', 'America/Lima'], ['波哥大', 'America/Bogota'],
-        ['巴拿马', 'America/Panama'], ['哈瓦那', 'America/Havana']
+      美洲: [
+        ['阿拉瓜伊纳', 'America/Araguaina'], ['阿鲁巴', 'America/Aruba'], ['埃达克', 'America/Adak'],
+        ['埃德蒙顿', 'America/Edmonton'], ['埃鲁内佩', 'America/Eirunepe'], ['埃莫西约', 'America/Hermosillo'],
+        ['安圭拉', 'America/Anguilla'], ['安克雷奇', 'America/Anchorage'], ['安提瓜', 'America/Antigua'],
+        ['奥希纳加', 'America/Ojinaga'], ['巴巴多斯', 'America/Barbados'], ['巴拿马城', 'America/Panama'],
+        ['巴伊亚', 'America/Bahia'], ['巴伊亚班德拉斯', 'America/Bahia_Banderas'], ['贝伦', 'America/Belem'],
+        ['波多黎各', 'America/Puerto_Rico'], ['波多韦柳', 'America/Porto_Velho'], ['波哥大', 'America/Bogota'],
+        ['伯利兹', 'America/Belize'], ['博阿维斯塔', 'America/Boa_Vista'], ['博伊西', 'America/Boise'],
+        ['布朗萨布隆', 'America/Blanc-Sablon'], ['大坎普', 'America/Campo_Grande'], ['大特克', 'America/Grand_Turk'],
+        ['丹佛', 'America/Denver'], ['丹麦港', 'America/Danmarkshavn'], ['道森克里克', 'America/Dawson_Creek'],
+        ['底特律', 'America/Detroit'], ['蒂华纳', 'America/Tijuana'], ['多伦多', 'America/Toronto'],
+        ['多米尼克', 'America/Dominica'], ['菲尼克斯', 'America/Phoenix'], ['费尔南多迪诺罗尼亚', 'America/Noronha'],
+        ['福塔莱萨', 'America/Fortaleza'], ['哥斯达黎加', 'America/Costa_Rica'], ['格莱斯贝', 'America/Glace_Bay'],
+        ['格林纳达', 'America/Grenada'], ['古斯贝', 'America/Goose_Bay'], ['瓜德罗普', 'America/Guadeloupe'],
+        ['瓜亚基尔', 'America/Guayaquil'], ['哈利法克斯', 'America/Halifax'], ['哈瓦那', 'America/Havana'],
+        ['胡胡伊', 'America/Jujuy'], ['华雷斯城', 'America/Ciudad_Juarez'], ['怀特霍斯', 'America/Whitehorse'],
+        ['加拉加斯', 'America/Caracas'], ['卡塔马卡', 'America/Catamarca'], ['卡宴', 'America/Cayenne'],
+        ['开曼', 'America/Cayman'], ['坎昆', 'America/Cancun'], ['科尔多瓦', 'America/Cordoba'],
+        ['科伊艾克', 'America/Coyhaique'], ['克拉伦代克', 'America/Kralendijk'], ['克雷斯顿', 'America/Creston'],
+        ['库拉索', 'America/Curacao'], ['库亚巴', 'America/Cuiaba'], ['拉巴斯', 'America/La_Paz'],
+        ['兰金因莱特', 'America/Rankin_Inlet'], ['雷索卢特', 'America/Resolute'], ['累西腓', 'America/Recife'],
+        ['里奥布兰科', 'America/Rio_Branco'], ['里奥加耶戈斯', 'America/Argentina/Rio_Gallegos'], ['里贾纳', 'America/Regina'],
+        ['利马', 'America/Lima'], ['路易斯维尔', 'America/Louisville'], ['洛杉矶', 'America/Los_Angeles'],
+        ['马里戈特', 'America/Marigot'], ['马那瓜', 'America/Managua'], ['马瑙斯', 'America/Manaus'],
+        ['马萨特兰', 'America/Mazatlan'], ['马塞约', 'America/Maceio'], ['马塔莫罗斯', 'America/Matamoros'],
+        ['马提尼克', 'America/Martinique'], ['梅里达', 'America/Merida'], ['梅诺米尼', 'America/Menominee'],
+        ['梅特拉卡特拉', 'America/Metlakatla'], ['门多萨', 'America/Mendoza'], ['蒙得维的亚', 'America/Montevideo'],
+        ['蒙克顿', 'America/Moncton'], ['蒙特雷', 'America/Monterrey'], ['蒙特塞拉特', 'America/Montserrat'],
+        ['密克隆', 'America/Miquelon'], ['墨西哥城', 'America/Mexico_City'], ['拿骚', 'America/Nassau'],
+        ['纳尔逊堡', 'America/Fort_Nelson'], ['纽约', 'America/New_York'], ['努克', 'America/Nuuk'],
+        ['诺姆', 'America/Nome'], ['帕拉马里博', 'America/Paramaribo'], ['蓬塔阿雷纳斯', 'America/Punta_Arenas'],
+        ['奇瓦瓦', 'America/Chihuahua'], ['乔治敦', 'America/Guyana'], ['萨尔塔', 'America/Argentina/Salta'],
+        ['圣巴泰勒米', 'America/St_Barthelemy'], ['圣保罗', 'America/Sao_Paulo'], ['圣地亚哥', 'America/Santiago'],
+        ['圣多明各', 'America/Santo_Domingo'], ['圣基茨', 'America/St_Kitts'], ['圣卢西亚', 'America/St_Lucia'],
+        ['圣萨尔瓦多', 'America/El_Salvador'], ['圣塔伦', 'America/Santarem'], ['圣托马斯', 'America/St_Thomas'],
+        ['圣文森特', 'America/St_Vincent'], ['圣约翰斯', 'America/St_Johns'], ['斯科斯比松', 'America/Scoresbysund'],
+        ['斯威夫特卡伦特', 'America/Swift_Current'], ['太子港', 'America/Port-au-Prince'], ['特古西加尔巴', 'America/Tegucigalpa'],
+        ['图库曼', 'America/Argentina/Tucuman'], ['图勒', 'America/Thule'], ['托尔托拉', 'America/Tortola'],
+        ['危地马拉城', 'America/Guatemala'], ['温哥华', 'America/Vancouver'], ['温尼伯', 'America/Winnipeg'],
+        ['乌斯怀亚', 'America/Argentina/Ushuaia'], ['西班牙港', 'America/Port_of_Spain'], ['锡特卡', 'America/Sitka'],
+        ['下王子区', 'America/Lower_Princes'], ['牙买加', 'America/Jamaica'], ['亚库塔特', 'America/Yakutat'],
+        ['亚松森', 'America/Asuncion'], ['伊魁特', 'America/Iqaluit'], ['伊努维克', 'America/Inuvik'],
+        ['印第安纳波利斯', 'America/Indianapolis'], ['芝加哥', 'America/Chicago'], ['朱诺', 'America/Juneau'],
+        ['Beulah', 'America/North_Dakota/Beulah'], ['Cambridge Bay', 'America/Cambridge_Bay'], ['Center', 'America/North_Dakota/Center'],
+        ['Dawson', 'America/Dawson'], ['Knox', 'America/Indiana/Knox'], ['La Rioja', 'America/Argentina/La_Rioja'],
+        ['Marengo', 'America/Indiana/Marengo'], ['Monticello', 'America/Kentucky/Monticello'], ['New Salem', 'America/North_Dakota/New_Salem'],
+        ['Petersburg', 'America/Indiana/Petersburg'], ['San Juan', 'America/Argentina/San_Juan'], ['San Luis', 'America/Argentina/San_Luis'],
+        ['Tell City', 'America/Indiana/Tell_City'], ['Vevay', 'America/Indiana/Vevay'], ['Vincennes', 'America/Indiana/Vincennes'],
+        ['Winamac', 'America/Indiana/Winamac']
       ],
-      Oceania: [
-        ['悉尼', 'Australia/Sydney'], ['墨尔本', 'Australia/Melbourne'], ['布里斯班', 'Australia/Brisbane'],
-        ['珀斯', 'Australia/Perth'], ['阿德莱德', 'Australia/Adelaide'], ['达尔文', 'Australia/Darwin'],
-        ['奥克兰', 'Pacific/Auckland'], ['斐济', 'Pacific/Fiji'], ['关岛', 'Pacific/Guam'],
-        ['莫尔兹比港', 'Pacific/Port_Moresby'], ['塔拉瓦', 'Pacific/Tarawa'],
-        ['汤加', 'Pacific/Tongatapu'], ['基里蒂马蒂', 'Pacific/Kiritimati']
+      大洋洲: [
+        ['阿德莱德', 'Australia/Adelaide'], ['阿皮亚', 'Pacific/Apia'], ['埃法特', 'Pacific/Efate'],
+        ['奥克兰', 'Pacific/Auckland'], ['波纳佩', 'Pacific/Pohnpei'], ['布干维尔', 'Pacific/Bougainville'],
+        ['布里斯班', 'Australia/Brisbane'], ['布罗肯希尔', 'Australia/Broken_Hill'], ['查塔姆群岛', 'Pacific/Chatham'],
+        ['楚克', 'Pacific/Chuuk'], ['达尔文', 'Australia/Darwin'], ['法考福', 'Pacific/Fakaofo'],
+        ['斐济', 'Pacific/Fiji'], ['富纳富提', 'Pacific/Funafuti'], ['甘比尔', 'Pacific/Gambier'],
+        ['瓜达尔卡纳尔', 'Pacific/Guadalcanal'], ['关岛', 'Pacific/Guam'], ['豪勋爵岛', 'Australia/Lord_Howe'],
+        ['霍巴特', 'Australia/Hobart'], ['基里蒂马蒂', 'Pacific/Kiritimati'], ['科斯雷', 'Pacific/Kosrae'],
+        ['夸贾林', 'Pacific/Kwajalein'], ['拉罗汤加', 'Pacific/Rarotonga'], ['林德曼', 'Australia/Lindeman'],
+        ['马克萨斯', 'Pacific/Marquesas'], ['马朱罗', 'Pacific/Majuro'], ['莫尔兹比港', 'Pacific/Port_Moresby'],
+        ['墨尔本', 'Australia/Melbourne'], ['瑙鲁', 'Pacific/Nauru'], ['纽埃', 'Pacific/Niue'],
+        ['努美阿', 'Pacific/Noumea'], ['诺福克', 'Pacific/Norfolk'], ['帕果帕果', 'Pacific/Pago_Pago'],
+        ['帕劳', 'Pacific/Palau'], ['皮特凯恩', 'Pacific/Pitcairn'], ['珀斯', 'Australia/Perth'],
+        ['塞班', 'Pacific/Saipan'], ['塔拉瓦', 'Pacific/Tarawa'], ['塔希提', 'Pacific/Tahiti'],
+        ['汤加塔布', 'Pacific/Tongatapu'], ['瓦利斯', 'Pacific/Wallis'], ['威克岛', 'Pacific/Wake'],
+        ['悉尼', 'Australia/Sydney'], ['尤克拉', 'Australia/Eucla'], ['中途岛', 'Pacific/Midway'],
+        ['Easter', 'Pacific/Easter'], ['Galapagos', 'Pacific/Galapagos'], ['Honolulu', 'Pacific/Honolulu'],
+        ['Kanton', 'Pacific/Kanton']
       ],
-      Africa: [
-        ['开罗', 'Africa/Cairo'], ['约翰内斯堡', 'Africa/Johannesburg'], ['拉各斯', 'Africa/Lagos'],
-        ['内罗毕', 'Africa/Nairobi'], ['卡萨布兰卡', 'Africa/Casablanca'], ['阿尔及尔', 'Africa/Algiers'],
-        ['突尼斯', 'Africa/Tunis'], ['亚的斯亚贝巴', 'Africa/Addis_Ababa'], ['达喀尔', 'Africa/Dakar']
+      非洲: [
+        ['阿比让', 'Africa/Abidjan'], ['阿尔及尔', 'Africa/Algiers'], ['阿克拉', 'Africa/Accra'],
+        ['阿斯马拉', 'Africa/Asmara'], ['阿尤恩', 'Africa/El_Aaiun'], ['巴马科', 'Africa/Bamako'],
+        ['班吉', 'Africa/Bangui'], ['班珠尔', 'Africa/Banjul'], ['比绍', 'Africa/Bissau'],
+        ['波多诺伏', 'Africa/Porto-Novo'], ['布拉柴维尔', 'Africa/Brazzaville'], ['布兰太尔', 'Africa/Blantyre'],
+        ['布琼布拉', 'Africa/Bujumbura'], ['查戈斯', 'Indian/Chagos'], ['达喀尔', 'Africa/Dakar'],
+        ['达累斯萨拉姆', 'Africa/Dar_es_Salaam'], ['的黎波里', 'Africa/Tripoli'], ['杜阿拉', 'Africa/Douala'],
+        ['恩贾梅纳', 'Africa/Ndjamena'], ['弗里敦', 'Africa/Freetown'], ['哈博罗内', 'Africa/Gaborone'],
+        ['哈拉雷', 'Africa/Harare'], ['基加利', 'Africa/Kigali'], ['吉布提', 'Africa/Djibouti'],
+        ['金沙萨', 'Africa/Kinshasa'], ['喀土穆', 'Africa/Khartoum'], ['卡萨布兰卡', 'Africa/Casablanca'],
+        ['开罗', 'Africa/Cairo'], ['凯尔盖朗', 'Indian/Kerguelen'], ['坎帕拉', 'Africa/Kampala'],
+        ['科科斯', 'Indian/Cocos'], ['科摩罗', 'Indian/Comoro'], ['科纳克里', 'Africa/Conakry'],
+        ['拉各斯', 'Africa/Lagos'], ['利伯维尔', 'Africa/Libreville'], ['留尼汪', 'Indian/Reunion'],
+        ['卢本巴希', 'Africa/Lubumbashi'], ['卢萨卡', 'Africa/Lusaka'], ['罗安达', 'Africa/Luanda'],
+        ['洛美', 'Africa/Lome'], ['马埃', 'Indian/Mahe'], ['马尔代夫', 'Indian/Maldives'],
+        ['马拉博', 'Africa/Malabo'], ['马普托', 'Africa/Maputo'], ['马塞卢', 'Africa/Maseru'],
+        ['马约特', 'Indian/Mayotte'], ['毛里求斯', 'Indian/Mauritius'], ['蒙罗维亚', 'Africa/Monrovia'],
+        ['摩加迪沙', 'Africa/Mogadishu'], ['姆巴巴内', 'Africa/Mbabane'], ['内罗毕', 'Africa/Nairobi'],
+        ['尼亚美', 'Africa/Niamey'], ['努瓦克肖特', 'Africa/Nouakchott'], ['圣诞岛', 'Indian/Christmas'],
+        ['圣多美', 'Africa/Sao_Tome'], ['塔那那利佛', 'Indian/Antananarivo'], ['突尼斯', 'Africa/Tunis'],
+        ['瓦加杜古', 'Africa/Ouagadougou'], ['温得和克', 'Africa/Windhoek'], ['休达', 'Africa/Ceuta'],
+        ['亚的斯亚贝巴', 'Africa/Addis_Ababa'], ['约翰内斯堡', 'Africa/Johannesburg'], ['朱巴', 'Africa/Juba']
       ],
-      UTC: [['协调世界时', 'UTC']]
+      UTC: [
+        ['协调世界时', 'UTC']
+      ],
+      南极洲: [
+        ['戴维斯', 'Antarctica/Davis'], ['迪蒙迪维尔', 'Antarctica/DumontDUrville'], ['东方站', 'Antarctica/Vostok'],
+        ['凯西', 'Antarctica/Casey'], ['罗瑟拉', 'Antarctica/Rothera'], ['麦克默多', 'Antarctica/McMurdo'],
+        ['麦夸里', 'Antarctica/Macquarie'], ['莫森', 'Antarctica/Mawson'], ['帕尔默', 'Antarctica/Palmer'],
+        ['特罗尔', 'Antarctica/Troll'], ['昭和', 'Antarctica/Syowa']
+      ],
     };
-    /* 中文名可能用不上时（ICU 里叫别名），补一份 IANA 原名做后备 */
+
+    /* 个别浏览器 ICU 版本较旧，只认已废弃的别名。用现行规范名当主值，
+       解析不到时退回旧名，保证列表里的每一项都能真正生效。 */
     const TZ_ALIAS = {
       'Asia/Kolkata': ['Asia/Calcutta'],
       'Asia/Kathmandu': ['Asia/Katmandu'],
       'Asia/Yangon': ['Asia/Rangoon'],
       'Asia/Ho_Chi_Minh': ['Asia/Saigon'],
+      'Asia/Macau': ['Asia/Macao'],
+      'Asia/Ulaanbaatar': ['Asia/Ulan_Bator'],
       'Europe/Kyiv': ['Europe/Kiev'],
-      'America/Argentina/Buenos_Aires': ['America/Buenos_Aires']
+      'Atlantic/Faroe': ['Atlantic/Faeroe'],
+      'Africa/Asmara': ['Africa/Asmera'],
+      'Pacific/Pohnpei': ['Pacific/Ponape'],
+      'Pacific/Chuuk': ['Pacific/Truk'],
+      'Pacific/Kanton': ['Pacific/Enderbury'],
+      'America/Nuuk': ['America/Godthab']
     };
-
     let tzIndex = null;    // { 'Asia/Shanghai': { region, city, label } }
 
     function tzUsable(id) {
@@ -1330,8 +1449,8 @@
       return '';
     }
 
-    /* 列出所有可用城市。精选之外用浏览器支持的时区补齐，
-       否则会出现"列表里没有我所在的城市"。 */
+    /* 列表已覆盖 IANA 全部地区（406 个城市），这里只做一次可用性过滤：
+       个别浏览器的 ICU 版本较旧，可能不认某个现行规范名，那就退回它能认的别名。 */
     function tzCatalogue() {
       const out = {};
       Object.keys(TZ_CURATED).forEach(function (region) {
@@ -1340,23 +1459,6 @@
           const usable = tzPick(pair[1]);
           if (usable) out[region].push({ label: pair[0], id: usable });
         });
-      });
-
-      let supported = [];
-      try { supported = Intl.supportedValuesOf('timeZone') || []; } catch (e) { supported = []; }
-      const known = {};
-      Object.keys(out).forEach(function (r) { out[r].forEach(function (c) { known[c.id] = 1; }); });
-      /* Australia / Pacific 已被"大洋洲"覆盖，再单列会和精选城市重复；
-         巴西/阿根廷那些三段式时区归到美洲，避免多出奇怪的一级地区。 */
-      const SKIP_REGION = { Australia: 1, Pacific: 1, Brazil: 1, Argentina: 1, Mexico: 1, Chile: 1, US: 1, Canada: 1, Etc: 1 };
-      supported.forEach(function (id) {
-        if (known[id]) return;
-        if (!/^[A-Za-z]+\/[A-Za-z0-9_+\-]+$/.test(id)) return;
-        const region = id.split('/')[0];
-        if (SKIP_REGION[region]) return;
-        if (!out[region]) out[region] = [];
-        out[region].push({ label: id.split('/')[1].replace(/_/g, ' '), id: id });
-        known[id] = 1;
       });
       return out;
     }
