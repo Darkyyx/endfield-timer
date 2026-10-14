@@ -105,6 +105,17 @@ await check('未填时使用默认字体变量', () => {
   return '默认值生效';
 });
 
+await check('默认中文字体栈按名字列出常见中文字体，且 CSS 与 JS 保持一致', () => {
+  const css = (html.match(/--font-zh:([^;]+);/) || [])[1] || '';
+  const js = (code.match(/const DEFAULT_ZH = '([^']+)'/) || [])[1] || '';
+  assert(css && js, '未找到默认中文字体栈');
+  assert(css === js, 'CSS 与 JS 的默认中文栈不一致：\n  CSS=' + css + '\n  JS =' + js);
+  // 只写一个多数机器没装的字体 → 会回退到通用 sans-serif，中文观感发虚
+  assert(/Microsoft YaHei/.test(css), '默认中文栈应包含微软雅黑：' + css);
+  assert(/PingFang SC/.test(css) && /Hiragino Sans GB/.test(css), '应兼顾 macOS 的中文字体');
+  return css.slice(0, 46) + '…';
+});
+
 await check('含空格的字族名自动加引号（不加引号会被 CSS 当成多个字体名而失效）', () => {
   const { getEl, cssVars } = boot([]);
   getEl('fnZh').value = 'Maple Mono NF CN';
