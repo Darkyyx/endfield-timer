@@ -16,7 +16,7 @@
 /* Worker 版本号。页面会拿它和自身版本比对，不一致就提示"该重新部署 Worker 了" —— 
    否则改了 worker.js 却忘了部署，会表现为"功能不生效"且毫无线索。
    发新版时与 index.html 页脚的版本号保持一致。 */
-const WORKER_VERSION = '1.11.7';
+const WORKER_VERSION = '1.12.0';
 
 const DEFAULTS = {
   // 推送到某个产线达到上限/下限前多少秒开始预警
@@ -133,18 +133,75 @@ function decideAlert(prev, level) {
   return null;
 }
 
-/** 只给时刻，形如 14:32 —— 日期由 App 自身的通知时间体现，不重复写 */
-function fmtClock(ms) {
+/**
+ * 把所有对外显示的时间统一按"固定小时偏移"的时区来格式化。
+ *
+ * 为什么必须显式指定：Cloudflare Workers 的运行时是 UTC，`getHours()` 拿到的
+ * 永远是 UTC 时刻，和用户实际所在时区无关——直接用它会让通知里的预计时间差 8 小时。
+ *
+ * 这里不接受 IANA 名称（如 Asia/Shanghai）是因为 Etc/GMT 的符号与直觉相反
+ * （UTC+8 对应 Etc/GMT-8），映射起来容易出错；用数字偏移配合 POSIX 时区串最直接。
+ * 注意：POSIX 时区串的符号同样与常识相反，UTC+8 写作 "UTC-8"。
+ */
+function posixZone(offset) {
+  const o = Number(offset);
+  if (!isFinite(o) || o === 0) return 'UTC';
+  const sign = o > 0 ? '-' : '+';
+  const abs = Math.abs(o);
+  const h = Math.floor(abs);
+  const m = Math.round((abs - h) * 60);
+  return 'UTC' + sign + h + (m ? ':' + String(m).padStart(2, '0') : '');
+}
+
+/** 从任意配置值里解析出小时偏移；缺失或非法时回落到 +8（北京时间） */
+function tzOffset(tz) {
+  const o = Number(tz);
+  if (!isFinite(o) || o < -12 || o > 14) return 8;
+  return Math.round(o * 2) / 2;        // 支持半小时时区（如 UTC+5:30）
+}
+
+function tzLabel(tz) {
+  const o = tzOffset(tz);
+  const v = Math.abs(o);
+  const h = Math.floor(v);
+  const m = Math.round((v - h) * 60);
+  return 'UTC' + (o < 0 ? '-' : '+') + h + (m ? ':' + String(m).padStart(2, '0') : '');
+}
+
+/** 在指定时区里格式化某个时刻；withDate 为真时带上日期 */
+function fmtInZone(ms, tz, withDate) {
   const d = new Date(ms);
   const p = function (n) { return String(n).padStart(2, '0'); };
-  return p(d.getHours()) + ':' + p(d.getMinutes());
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: posixZone(tz),
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false
+    }).formatToParts(d);
+    const get = function (t) { const f = parts.find(function (x) { return x.type === t; }); return f ? f.value : ''; };
+    const clock = get('hour') + ':' + get('minute');
+    return withDate ? (get('month') + '-' + get('day') + ' ' + clock) : clock;
+  } catch (e) {
+    // 极端环境下 Intl 不可用：退回固定偏移手算，结果一致
+    const shifted = new Date(ms + tzOffset(tz) * 3600000);
+    const clock = p(shifted.getUTCHours()) + ':' + p(shifted.getUTCMinutes());
+    return withDate
+      ? p(shifted.getUTCMonth() + 1) + '-' + p(shifted.getUTCDate()) + ' ' + clock
+      : clock;
+  }
+}
+
+/** 只给时刻，形如 14:32 —— 日期由 App 自身的通知时间体现，不重复写 */
+function fmtClock(ms, tz) {
+  return fmtInZone(ms, tz, false);
 }
 
 /**
  * 把一条产线渲染成一条独立消息（不再合并）。
  * 正文只说明"发生了什么 / 什么时候发生"，不带存量、上限、净速率和快照时间。
+ * tz 是展示用时区的小时偏移，见 fmtInZone()。
  */
-function composeItemMessage(item, now) {
+function composeItemMessage(item, now, tz) {
   const row = item.row;
   const meta = LEVEL_META[item.level];
   const remark = typeof row.remark === 'string' ? row.remark.trim() : '';
@@ -159,7 +216,7 @@ function composeItemMessage(item, now) {
       ? Math.max(0, (CAPS[row.region] || CAPS.gudi) - projectStock(row, now))
       : projectStock(row, now);
     const mins = Math.max(0, Math.round(remain / Math.abs(net)));
-    desp = '预计 ' + fmtClock(now + mins * 60000) + ' ' + meta.title.replace('即将', '')
+    desp = '预计 ' + fmtClock(now + mins * 60000, tz) + ' ' + meta.title.replace('即将', '')
       + '（约 ' + mins + ' 分钟后）';
   } else if (item.level === 2) {
     desp = '仓库已填满';
@@ -173,6 +230,7 @@ function composeItemMessage(item, now) {
 /* 仅供本地 worker.test.mjs 调用；Cloudflare 只使用 default 导出，多一个具名导出不影响运行 */
 export const __test = {
   projectStock, evaluateLevel, decideAlert, composeItemMessage, fmtClock,
+  tzOffset, tzLabel, fmtInZone, posixZone, quotaMessage, quotaResetText,
   deriveUid, resolveCredentials, effectiveConfig,
   quotaCooldown, pendingWrites
 };
@@ -273,6 +331,9 @@ async function effectiveConfig(env, cfg) {
       full: at.full !== false,
       empty: at.empty !== false
     },
+    // 展示用时区（小时偏移）。meta 里没有就用 Worker 环境变量，再没有就 +8。
+    timeZone: meta.timeZone != null && meta.timeZone !== '' ? tzOffset(meta.timeZone)
+      : (cfg.TIME_ZONE != null && cfg.TIME_ZONE !== '' ? tzOffset(cfg.TIME_ZONE) : 8),
     lastQuotaAt: num(meta.lastQuotaAt)
   };
 }
@@ -295,8 +356,31 @@ async function saveQuotaFlag(env, at) {
  * 另外把"配额耗尽"这类可恢复错误换成可读信息，而不是让页面显示一串英文异常。
  */
 const QUOTA_RE = /limit exceeded|quota|429|daily/i;
-// 额度按 UTC 零点重置；换算成 UTC+8 展示，避免用户自己算时差
-const QUOTA_MSG = 'KV 每日写入额度已用尽（免费版 1000 次/天），每天 8:00 点重置';
+
+/**
+ * 额度重置时刻的文案。
+ * Cloudflare 按 **UTC 零点** 重置额度，所以本地时间取决于用户选的时区：
+ * UTC+8 → 8:00，UTC+9 → 9:00，UTC-5 → 前一天 19:00。
+ * 时区未知（例如上面那些还没拿到配置就出错的路径）时只说"次日"，不写死时间，避免误导。
+ */
+function quotaResetText(tz) {
+  const raw = Number(tz);
+  if (!isFinite(raw) || raw < -12 || raw > 14) return '次日重置';
+  const o = tzOffset(raw);
+  const h = ((24 + o) % 24 + 24) % 24;
+  const mm = Math.round((h - Math.floor(h)) * 60);
+  const hh = Math.floor(h);
+  // 钟点不补零（"每天 8:00"），分钟补零（"8:05"）
+  const clock = hh + ':' + String(mm).padStart(2, '0');
+  return (o >= 0 ? '每天 ' : '每天（前一天）') + clock + ' 点重置';
+}
+
+function quotaMessage(tz) {
+  return 'KV 每日写入额度已用尽（免费版 1000 次/天），' + quotaResetText(tz);
+}
+
+// 时区未知时的兜底（不写死钟点，避免换时区后误导）
+const QUOTA_MSG = 'KV 每日写入额度已用尽（免费版 1000 次/天），次日重置';
 
 async function safePut(env, pairs) {
   const list = (pairs || []).filter(function (p) { return p && p.key; });
@@ -390,19 +474,23 @@ async function handleSync(request, env, cfg) {
     }
   }
 
-  // 前端设置面板里的"预警提前量"与"提醒方向"以这里为准，避免两处配置打架
+  // 前端设置面板里的"预警提前量""提醒方向""展示时区"以这里为准，避免两处配置打架
   const warnMinutes = num(body && body.warnMinutes);
   const at = (body && body.alertTypes) || null;
-  if (warnMinutes > 0 || at) {
+  const tzIn = body && body.timeZone != null && body.timeZone !== '' ? num(body.timeZone) : NaN;
+  if (warnMinutes > 0 || at || isFinite(tzIn)) {
     const prev = (await env.STATE.get('meta:config', 'json')) || {};
     const next = {
       warnMinutes: warnMinutes > 0 ? Math.min(720, warnMinutes) : num(prev.warnMinutes) || 30,
       alertTypes: at
         ? { full: at.full !== false, empty: at.empty !== false }
-        : (prev.alertTypes || { full: true, empty: true })
+        : (prev.alertTypes || { full: true, empty: true }),
+      // 时区只在页面明确上报时覆盖；缺失时保留原值，避免旧版页面把设置清掉
+      timeZone: isFinite(tzIn) ? tzOffset(tzIn) : (prev.timeZone != null ? prev.timeZone : undefined)
     };
     // 只有真的变了才写，避免每次心跳都消耗一次写入额度
     if (next.warnMinutes !== num(prev.warnMinutes)
+      || next.timeZone !== prev.timeZone
       || !prev.alertTypes
       || next.alertTypes.full !== prev.alertTypes.full
       || next.alertTypes.empty !== prev.alertTypes.empty) {
@@ -494,7 +582,9 @@ async function handleSync(request, env, cfg) {
   // 额度状态以 KV 里的记录（meta:config.lastQuotaAt）为权威，**不再无条件相信页面的回显**。
   // 否则会出现自我维持的死循环：页面把 localStorage 里的旧时间戳传上来 → 这里回显 →
   // 页面又存回去 → 下次继续传……即使额度早已重置也永远解不掉。
-  const cfgMeta = quotaHit ? null : await effectiveConfig(env, cfg);
+  // 额度刚命中时也可以读配置（只是写不进去），所以要拿时区来做文案。
+  const cfgMeta = await effectiveConfig(env, cfg);
+  const quotaText = quotaHit ? quotaMessage(cfgMeta.timeZone) : quotaMsg;
   let reportedQuotaAt = quotaHit ? quotaAt : (lastQuota || (cfgMeta && cfgMeta.lastQuotaAt) || 0);
 
   // 页面报着"额度不足"但 KV 里没有任何记录时，做一次探测写入来验证：
@@ -509,6 +599,7 @@ async function handleSync(request, env, cfg) {
       value: JSON.stringify({
         warnMinutes: num(cfg && cfg.WARN_SECONDS) > 0 ? Math.round(num(cfg.WARN_SECONDS) / 60) : 30,
         alertTypes: (cfgMeta && cfgMeta.types) || { full: true, empty: true },
+        timeZone: cfgMeta ? cfgMeta.timeZone : undefined,
         lastQuotaAt: 0,
         updatedAt: Date.now()
       })
@@ -526,7 +617,10 @@ async function handleSync(request, env, cfg) {
     quota: reportedQuotaAt ? 1 : 0,     // 含"这次没写、但已知额度不足"的情况
     quotaAt: reportedQuotaAt,
     probed: probeFailed ? 1 : 0,
-    message: reportedQuotaAt ? quotaMsg : undefined,
+    message: reportedQuotaAt ? quotaText : undefined,
+    // 回传时区与重置时刻文案，页面不必自己再算一遍（避免两边算法漂移）
+    timeZone: cfgMeta ? cfgMeta.timeZone : tzOffset(8),
+    quotaReset: quotaResetText(cfgMeta ? cfgMeta.timeZone : 8),
     writes: rowPuts.length + missPuts.length,
     rows: written,
     removed: removed,
@@ -636,7 +730,7 @@ async function handleState(request, env, cfg) {
   if (!checkToken(request, env)) return json({ ok: 0, message: '令牌错误' }, 401);
 
   const now = Date.now();
-  const { warnSeconds, types } = await effectiveConfig(env, cfg);
+  const { warnSeconds, types, timeZone } = await effectiveConfig(env, cfg);
   const out = [];
   const list = await env.STATE.list({ prefix: 'row:' });
   for (const k of list.keys) {
@@ -662,6 +756,7 @@ async function handleState(request, env, cfg) {
     ok: 1,
     worker: WORKER_VERSION,
     now: now,
+    timeZone: timeZone,
     owner: owner ? { clientId: owner.clientId || '', host: owner.host || '', since: owner.since || 0 } : null,
     lastQuotaAt: num(cfgMeta.lastQuotaAt) || 0,
     rows: out
@@ -707,11 +802,14 @@ async function handleResetAlerts(request, env, cfg) {
 /* ================= /test 与推送 ================= */
 
 async function handleTest(env, cfg) {
+  // 检查时间按用户选的时区展示，并标出时区名，避免"这个时间是哪个时区"的疑问
+  const eff = await effectiveConfig(env, cfg);
+  const tz = eff.timeZone;
   const res = await pushServerChan(env, cfg, {
     title: '✅ 终末地通知测试',
     desp: '如果你在 App 里看到这条消息，说明 **Worker → Server酱** 这条链路已经打通。\n\n'
       + '- 推送地址模板：`' + cfg.SC_ENDPOINT + '`\n'
-      + '- 检查时间：' + new Date(Date.now()).toISOString(),
+      + '- 检查时间：' + fmtInZone(Date.now(), tz, true) + '（' + tzLabel(tz) + '）',
     short: '链路自检成功',
     tags: '测试'
   });
@@ -817,7 +915,7 @@ async function runPatrol(env, cfg) {
   }
 
   const now = Date.now();
-  const { warnSeconds, types } = await effectiveConfig(env, cfg);
+  const { warnSeconds, types, timeZone } = await effectiveConfig(env, cfg);
   const retryCooldown = num(cfg.PUSH_RETRY_COOLDOWN_MS);
 
   const list = await env.STATE.list({ prefix: 'row:' });
@@ -859,7 +957,7 @@ async function runPatrol(env, cfg) {
   let lastErr = null;
 
   for (const c of ordered) {
-    const one = await pushServerChan(env, cfg, composeItemMessage(c, now));
+    const one = await pushServerChan(env, cfg, composeItemMessage(c, now, timeZone));
     if (!one.ok) {
       allOk = false;
       lastErr = one.message;

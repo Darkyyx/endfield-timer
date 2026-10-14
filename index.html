@@ -619,6 +619,23 @@
           <input type="number" id="ntWarn" min="1" max="720" step="1" value="30">
           <span class="tip">即将爆仓或耗尽时提醒</span>
         </label>
+        <label>
+          <span class="k">时区</span>
+          <select class="inp sel" id="ntTz">
+            <option value="8">UTC+8　北京 / 新加坡</option>
+            <option value="9">UTC+9　东京 / 首尔</option>
+            <option value="7">UTC+7　曼谷 / 雅加达</option>
+            <option value="5.5">UTC+5:30　新德里</option>
+            <option value="4">UTC+4　迪拜</option>
+            <option value="1">UTC+1　柏林 / 巴黎</option>
+            <option value="0">UTC+0　伦敦</option>
+            <option value="-3">UTC-3　圣保罗</option>
+            <option value="-5">UTC-5　纽约</option>
+            <option value="-7">UTC-7　丹佛</option>
+            <option value="-8">UTC-8　洛杉矶</option>
+          </select>
+          <span class="tip">通知里预计时间所用的时区</span>
+        </label>
       </div>
 
       <div class="ntToggles">
@@ -651,7 +668,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.11.7</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.12.0</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -665,7 +682,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.11.7';
+  const PAGE_VERSION = '1.12.0';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1221,6 +1238,7 @@
     const urlEl = $('ntUrl');
     const tokenEl = $('ntToken');
     const warnEl = $('ntWarn');
+    const tzEl = $('ntTz');
     const onEl = $('ntOn');
     const fullEl = $('ntWarnFull');
     const emptyEl = $('ntWarnEmpty');
@@ -1267,7 +1285,10 @@
         warn: Number.isFinite(Number(c.warn)) && Number(c.warn) > 0 ? Math.floor(Number(c.warn)) : 30,
         on: !!c.on,
         warnFull: typeof c.warnFull === 'boolean' ? c.warnFull : true,
-        warnEmpty: typeof c.warnEmpty === 'boolean' ? c.warnEmpty : legacyEmpty
+        warnEmpty: typeof c.warnEmpty === 'boolean' ? c.warnEmpty : legacyEmpty,
+        // 通知里预计时间所用的时区（小时偏移）。默认 +8（北京时间）。
+        tz: Number.isFinite(Number(c.tz)) && Number(c.tz) >= -12 && Number(c.tz) <= 14
+          ? Number(c.tz) : 8
       };
     }
 
@@ -1298,9 +1319,19 @@
 
     /* KV 额度用尽的状态要跨刷新保留：只读/无改动的请求不写 KV，
        不能因为"这次请求本身成功"就显示绿灯。 */
-    /* 额度重置时间：Cloudflare 按 UTC 零点重置额度，即北京时间每天 8:00 */
+    /**
+     * 额度重置时刻文案。Cloudflare 按 **UTC 零点** 重置额度，本地钟点取决于所选时区：
+     * UTC+8 → 8:00，UTC+9 → 9:00，UTC-5 → 前一天 19:00。
+     * /sync 响应里带 quotaReset 时优先用它（Worker 是权威，避免两边算法漂移）。
+     */
+    let serverQuotaReset = '';
     function quotaResetHint() {
-      return '每天 8:00 点重置';
+      if (serverQuotaReset) return serverQuotaReset;
+      const h = ((24 + cfg.tz) % 24 + 24) % 24;
+      const hh = Math.floor(h);
+      const mm = Math.round((h - hh) * 60);
+      return (cfg.tz >= 0 ? '每天 ' : '每天（前一天）')
+        + hh + ':' + String(mm).padStart(2, '0') + ' 点重置';
     }
 
     function readQuotaAt() {
@@ -1394,6 +1425,7 @@
         quotaAt: quotaAt || 0,      // 回显给 Worker：额度用尽时它自己写不进 KV，只能靠页面记着
         warnMinutes: cfg.warn,
         alertTypes: alertTypes(),
+        timeZone: cfg.tz,
         rows: list
       };
       return JSON.stringify(extra ? Object.assign(body, extra) : body);
@@ -1435,6 +1467,9 @@
           + '）· 请到 Cloudflare 重新粘贴部署 worker.js');
         return;
       }
+
+      // Worker 是重置时刻文案的权威（它知道 KV 的真实时区配置）；拿不到就本地按 cfg.tz 推算
+      serverQuotaReset = typeof data.quotaReset === 'string' ? data.quotaReset : '';
 
       // KV 额度：只在"确实没写成功"或"本次探测确认仍不足"时才置位；
       // 一旦真实写入成功就清除——旧时间戳不能一直留在本地，否则永远解不掉。
@@ -1665,6 +1700,10 @@
       cfg.on = !!onEl.checked;
       cfg.warnFull = !!fullEl.checked;
       cfg.warnEmpty = !!emptyEl.checked;
+      const tz = Number(tzEl.value);
+      cfg.tz = (Number.isFinite(tz) && tz >= -12 && tz <= 14) ? tz : 8;
+      // 时区变了，本地推算的额度重置文案要作废，改用新时区重算
+      serverQuotaReset = '';
       // 把补全后的地址回填到输入框，让用户看到实际会请求到哪里
       if (urlEl.value !== cfg.url) urlEl.value = cfg.url;
       persist();
@@ -1692,12 +1731,12 @@
       });
     });
 
-    [onEl, fullEl, emptyEl].forEach(function (el) {
+    [onEl, fullEl, emptyEl, tzEl].forEach(function (el) {
       el.addEventListener('change', function () {
         refreshCfg();
         if (!cfg.on) { clearTimeout(syncTimer); setStatus('off', '未开启 · 数据只保存在本机'); return; }
         if (!ready()) { setStatus('err', '未填写 Worker 地址或同步令牌'); return; }
-        scheduleSync(200);   // 提醒方向变了，把设置同步给 Worker
+        scheduleSync(200);   // 提醒方向或时区变了，把设置同步给 Worker
       });
     });
 
@@ -1749,6 +1788,7 @@
     urlEl.value = cfg.url;
     tokenEl.value = cfg.token;
     warnEl.value = String(cfg.warn);
+    tzEl.value = String(cfg.tz);
     onEl.checked = cfg.on;
     claimedAt = readClaimTs();
     quotaAt = readQuotaAt();
