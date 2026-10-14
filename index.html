@@ -19,12 +19,14 @@
     --green:#6ee37a;
     --green-bright:#a8e86a;
     --red-dark:#a83b36;
-    /* 以下三个字体变量都被「显示设置」面板覆盖，这里的值只是页面加载瞬间的兜底。
-       实际顺序由面板里的「字体优先级」决定（脚本写内联样式），见 applyFonts()。
+    /* 以下三个字体变量都被「显示设置」面板覆盖，这里的值只是页面加载瞬间的兜底，
+       而且只用于"两个输入框都留空"时的观感（脚本会覆盖它们），见 applyFonts()。
        中文默认写成"显式指定常见中文字体"而不是单个 Noto Sans SC：后者多数机器没装，
        一路回退到通用 sans-serif 后，浏览器给中文选的字体和显式指定时不是同一条渲染路径，
        观感会明显发虚。按名字列出来能保证命中系统里真实存在的字体。 */
     --font-zh:"Noto Sans SC","Microsoft YaHei","PingFang SC","Hiragino Sans GB","Source Han Sans SC","WenQuanYi Micro Hei",sans-serif;
+    /* 英文默认靠 system-ui：Windows 得到 Segoe UI、macOS 得到 San Francisco、Linux 得到发行版默认。
+       Barlow 放在最前是为了页面原本的观感，机器上没装就自然跳过。 */
     --font-en:"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
     /* --mono-user 供数字区域使用（倒计时、数字框、HUD、页脚等 14 处）。
        全空时就是原来那套等宽字体栈，保持改造前的观感。 */
@@ -640,7 +642,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.11.2</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.11.3</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -654,7 +656,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.11.2';
+  const PAGE_VERSION = '1.11.3';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1893,9 +1895,15 @@
     const picked = zhFirst ? [customZh, customEn] : [customEn, customZh];
     const pickedList = picked.filter(Boolean).join(',');
 
-    root.style.setProperty('--mono-user', pickedList ? pickedList + ',' + DEFAULT_MONO : DEFAULT_MONO);
+    /* --mono-user 是"拉丁部分 + 中文兜底 + 等宽兜底"三段式。
+       中文字体链必须一直带着：h1 span、.hint、面板标题等含中文的元素都在用这个变量，
+       少了中文字体链，这些汉字会落到 monospace 通用族的中文兜底（通常是难看的宋体/点阵）。
+       顺序上拉丁在前，所以填了 Consolas 时数字走 Consolas、汉字仍走中文字体。 */
+    root.style.setProperty('--mono-user',
+      pickedList ? pickedList + ',' + DEFAULT_ZH + ',' + DEFAULT_MONO : DEFAULT_MONO);
     root.style.setProperty('--font-body',
-      pickedList ? pickedList + ',sans-serif' : DEFAULT_LATIN + ',' + DEFAULT_ZH + ',sans-serif');
+      pickedList ? pickedList + ',' + DEFAULT_ZH + ',sans-serif'
+                 : DEFAULT_LATIN + ',' + DEFAULT_ZH + ',sans-serif');
   }
 
   (function initFonts() {

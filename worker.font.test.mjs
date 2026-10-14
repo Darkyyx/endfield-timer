@@ -105,6 +105,19 @@ await check('未填时使用默认字体变量', () => {
   return '默认值生效';
 });
 
+await check('只填英文字体时，数字区仍保留中文字体链（否则含中文的元素会掉到通用族）', () => {
+  const { getEl, cssVars } = boot([]);
+  getEl('fnEn').value = 'Consolas';
+  getEl('fnEn').listeners.blur.forEach(fn => fn());
+  const mono = cssVars['--mono-user'] || '';
+  assert(mono.indexOf('Consolas') === 0, '英文字体应在最前：' + mono);
+  assert(/Microsoft YaHei/.test(mono), '丢失了中文字体链：' + mono);
+  assert(/ui-monospace/.test(mono), '丢失了等宽兜底：' + mono);
+  const body = cssVars['--font-body'] || '';
+  assert(/Microsoft YaHei/.test(body), '正文也丢失了中文字体链：' + body);
+  return 'Consolas → 中文字体链 → 等宽兜底';
+});
+
 await check('默认中文字体栈按名字列出常见中文字体，且 CSS 与 JS 保持一致', () => {
   const css = (html.match(/--font-zh:([^;]+);/) || [])[1] || '';
   const js = (code.match(/const DEFAULT_ZH = '([^']+)'/) || [])[1] || '';
