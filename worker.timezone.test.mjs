@@ -237,17 +237,32 @@ await check('列表覆盖 -12 到 +12 的全部整点，另含 +13 / +14，无�
   for (let i = -12; i <= 12; i++) assert(vals.includes(i), '缺少偏移 ' + i);
   assert(vals.includes(13) && vals.includes(14), '缺少 UTC+13 / UTC+14');
   assert(!vals.some(v => v % 1 !== 0), '不应出现非整点偏移：' + vals.filter(v => v % 1 !== 0));
-  assert(vals.indexOf(8) === 0, '首个选项应为 UTC+8，实际 ' + vals[0]);
+  assert(vals.includes(8), '缺少 UTC+8');
   return vals.length + ' 个整点偏移：' + vals[0] + ' … ' + vals[vals.length - 1];
 });
 
-await check('每项都带代表性城市名', () => {
+await check('按 +14 → 0 → -12 严格递减排列', () => {
+  const src = html.slice(html.indexOf('const TZ_LIST'), html.indexOf('function normalizeUrl'));
+  const vals = [...src.matchAll(/^\s*\[(-?\d+),/gm)].map(m => Number(m[1]));
+  assert(vals[0] === 14, '首项应为 UTC+14，实际 ' + vals[0]);
+  assert(vals[vals.length - 1] === -12, '末项应为 UTC-12，实际 ' + vals[vals.length - 1]);
+  for (let i = 1; i < vals.length; i++) {
+    assert(vals[i] === vals[i - 1] - 1, '第 ' + (i + 1) + ' 项应为 ' + (vals[i - 1] - 1) + '，实际 ' + vals[i]);
+  }
+  return '14 → 13 → … → 0 → … → -12，逐档递减';
+});
+
+await check('每档只给一个城市，不带斜杠或括号补充', () => {
   const src = html.slice(html.indexOf('const TZ_LIST'), html.indexOf('function normalizeUrl'));
   const labels = [...src.matchAll(/\[\s*-?\d+,\s*'(UTC[^']*)'\]/g)].map(m => m[1]);
   assert(labels.length >= 20, '标签过少：' + labels.length);
-  labels.forEach(l => assert(/^UTC[+-]\d+\s+\S/.test(l), '标签缺少城市名：' + l));
+  labels.forEach(l => {
+    const m = l.match(/^(UTC[+-]\d+)[　\s]+(\S+)$/);
+    assert(m, '标签形态不对（应为 "UTC±N　城市"）：' + l);
+    assert(!/[/、（）()]/.test(m[2]), '城市名不该有多个城市或补充说明：' + l);
+  });
   assert(labels.some(l => /上海/.test(l)), 'UTC+8 应含上海');
-  return labels.slice(0, 3).join(' | ') + ' …';
+  return labels.length + ' 档，每档一个城市';
 });
 
 await check('页面把 timeZone 偏移放进同步载荷', () => {
