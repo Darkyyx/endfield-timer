@@ -656,7 +656,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.16.3</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.16.4</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -670,7 +670,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.16.3';
+  const PAGE_VERSION = '1.16.4';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1567,10 +1567,14 @@
         /* 只说"数据同步"这一件事：本轮推了几条、Worker 写没写、有没有顺带回收残留。
            注意 foreign 是"Worker 手里不属于本页面的行数"，包含还没来得及回收的量，
            所以措辞用"待回收"，不要写成"待接管"（那会让人以为还需要再操作一次）。 */
+        /* 只有"既没写、也没删"才算无改动。
+           删除走的是 removed 而不是 writes —— 只看 writes 会把"删掉一条"
+           误标成无改动，而删除恰恰改变了 Worker 上的数据。 */
+        const noChange = num(data.writes, 0) === 0 && num(data.removed, 0) === 0 && !forced;
         const tail = foreign > 0
           ? (claimingRecently ? '（另待回收 ' + foreign + ' 条旧数据）'
             : '（Worker 上另有 ' + foreign + ' 条其它来源的数据）')
-          : (num(data.writes, 0) === 0 && !forced ? '（无改动）' : '');
+          : (noChange ? '（无改动）' : '');
         setStatus('ok', '已同步 ' + data.rows + ' 条' + tail);
       }
     }
