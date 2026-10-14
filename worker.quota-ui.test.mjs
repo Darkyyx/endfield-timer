@@ -217,6 +217,28 @@ await check('额度恢复（quota=0）后回到正常', async () => {
   return '同步 正常，标记已清除';
 });
 
+console.log('\nC0. 状态文案：同步结果与通知状态必须分得清');
+
+await check('没发过通知时说的是"尚无通知"，不是含糊的"尚未推送"', async () => {
+  const { getEl } = boot(Object.assign({}, okReply, { lastPushAt: 0 }));
+  await new Promise(r => setTimeout(r, 1700));
+  const msg = String(getEl('ntMsg').textContent);
+  assert(/已同步 \d+ 条/.test(msg), '应报出本轮同步条数：' + msg);
+  assert(/尚无通知（未到预警阈值）/.test(msg), '应说明还没触发过告警：' + msg);
+  // 旧文案会让人以为同步失败，必须彻底去掉
+  assert(!/尚未推送/.test(msg), '仍在用含糊的"尚未推送"：' + msg);
+  return msg;
+});
+
+await check('发过通知后显示"最近通知 + 时刻"', async () => {
+  const { getEl } = boot(Object.assign({}, okReply, { lastPushAt: Date.now() - 60000 }));
+  await new Promise(r => setTimeout(r, 1700));
+  const msg = String(getEl('ntMsg').textContent);
+  assert(/最近通知 \d{1,2}:\d{2}/.test(msg), '应给出最近一次通知时刻：' + msg);
+  assert(!/尚未推送|尚无通知/.test(msg), '已发过通知就不该再说尚无：' + msg);
+  return msg;
+});
+
 console.log('\nC. 手动「立即同步」不受自动优化约束');
 
 await check('自动同步在无改动时标注"未写入"', async () => {

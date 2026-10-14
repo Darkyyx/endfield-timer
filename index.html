@@ -656,7 +656,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.15.2</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.15.3</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -670,7 +670,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.15.2';
+  const PAGE_VERSION = '1.15.3';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1529,8 +1529,13 @@
             ? '（正在清理 ' + foreign + ' 条旧数据）'
             : '（另有 ' + foreign + ' 条别处数据待接管）')
           : (num(data.writes, 0) === 0 && !forced ? '（无改动，未写入）' : '');
+        /* 必须把"数据同步"和"通知推送"两件事分清楚：
+           前半句是本轮同步结果，后半句只表示"有没有发出过告警"。
+           原先写成"尚未推送"，容易被读成同步没成功，其实只是在说还没到过预警阈值。 */
         setStatus('ok', '已同步 ' + data.rows + ' 条 · '
-          + (lastPushAt ? ('最近推送 ' + new Date(lastPushAt).toLocaleTimeString('zh-CN')) : '尚未推送') + tail);
+          + (lastPushAt
+            ? ('最近通知 ' + new Date(lastPushAt).toLocaleTimeString('zh-CN'))
+            : '尚无通知（未到预警阈值）') + tail);
       }
     }
 
