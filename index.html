@@ -19,13 +19,15 @@
     --green:#6ee37a;
     --green-bright:#a8e86a;
     --red-dark:#a83b36;
-    --mono:ui-monospace,"SF Mono","Cascadia Mono",Consolas,"Liberation Mono",monospace;
-    /* 字体顺序：英文字体在前、中文字体在后，最后回落到原有默认。
-       CSS 回退按"字符"生效，所以英文/数字走英文字体，中文自动落到中文字体。
-       这两项由「显示设置」面板覆盖，只存本机。 */
-    --font-en:"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    /* 字体顺序：中文字体在前、英文字体在后（中文在前是为了兜底，不影响英文渲染）。
+       注意顺序不能反：像 Maple Mono NF CN 这类中文字体自带拉丁字形，
+       放在前面时中英文都由它渲染；若把纯拉丁字体放前面，中文会先落到系统字体上。 */
     --font-zh:"Noto Sans SC";
-    --font-body:var(--font-en),var(--font-zh),sans-serif;
+    --font-en:"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    /* --mono 也接入设置：页面里 13 处（倒计时、数字框、HUD、页脚等）都走这个变量，
+       不接入的话数字区域不会跟随设置变化。 */
+    --mono:var(--font-zh),var(--font-en),ui-monospace,"Cascadia Mono",Consolas,monospace;
+    --font-body:var(--font-zh),var(--font-en),sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html{color-scheme:dark}
@@ -542,26 +544,26 @@
   </div>
 
   <details class="ntPanel" id="fontPanel">
-    <summary><span class="sumDot"></span>显示设置 · FONT</summary>
+    <summary><span class="sumDot"></span>显示设置 · DISPLAY</summary>
     <div class="ntBody">
       <div class="ntGrid">
         <label>
           <span class="k">中文字体</span>
-          <input type="text" id="fnZh" placeholder="留空 = 使用默认" autocomplete="off" spellcheck="false">
+          <input type="text" id="fnZh" placeholder="使用默认" autocomplete="off" spellcheck="false">
         </label>
         <label>
           <span class="k">英文字体</span>
-          <input type="text" id="fnEn" placeholder="留空 = 使用默认" autocomplete="off" spellcheck="false">
+          <input type="text" id="fnEn" placeholder="使用默认" autocomplete="off" spellcheck="false">
         </label>
       </div>
       <div class="ntActions">
-        <span class="ntMsg">留空即用现在的字体 · 回车或失焦才应用 · 只保存在本机，不同步到 Worker</span>
+        <span class="ntMsg">未填写则使用默认字体 · 回车或失焦才应用 · 只保存在本机，不同步到 Worker</span>
       </div>
     </div>
   </details>
 
   <details class="ntPanel" id="ntPanel" data-state="off">
-    <summary><span class="sumDot"></span>通知设置 · SERVERCHAN PUSH</summary>
+    <summary><span class="sumDot"></span>通知设置 · NOTIFICATION</summary>
     <div class="ntBody">
       <div class="ntGrid">
         <label>
@@ -611,7 +613,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.10.0</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.10.1</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -625,7 +627,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.10.0';
+  const PAGE_VERSION = '1.10.1';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';

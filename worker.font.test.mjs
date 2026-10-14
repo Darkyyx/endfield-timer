@@ -105,6 +105,42 @@ await check('未填时使用默认字体变量', () => {
   return '默认值生效';
 });
 
+await check('字体设置覆盖到全部字体变量（含数字区域用的 --mono）', () => {
+  const { getEl, cssVars } = boot([]);
+  getEl('fnZh').value = 'Maple Mono NF CN';
+  getEl('fnEn').value = 'Consolas';
+  getEl('fnZh').listeners.blur.forEach(fn => fn());
+  getEl('fnEn').listeners.blur.forEach(fn => fn());
+  assert(/Maple Mono NF CN/.test(cssVars['--font-zh'] || ''), '中文未生效：' + cssVars['--font-zh']);
+  assert(/Consolas/.test(cssVars['--font-en'] || ''), '英文未生效：' + cssVars['--font-en']);
+  // 关键：CSS 里 --mono / --font-body 必须引用这两个变量，否则数字区域不会跟随
+  assert(/--mono:var\(--font-zh\),var\(--font-en\)/.test(html), '--mono 未接入字体设置');
+  assert(/--font-body:var\(--font-zh\),var\(--font-en\)/.test(html), '--font-body 未接入字体设置');
+  assert(!/--mono:ui-monospace/.test(html), '--mono 仍是写死的字体栈');
+  return '--mono 与 --font-body 都引用设置值';
+});
+
+await check('中文字体排在英文字体之前（中文字体自带拉丁字形时能接管英文）', () => {
+  const zhIdx = html.indexOf('--font-zh:');
+  const enIdx = html.indexOf('--font-en:');
+  assert(zhIdx > 0 && enIdx > 0, '未找到字体变量');
+  assert(zhIdx < enIdx, '配置顺序应为中文在前');
+  const mono = (html.match(/--mono:([^;]+);/) || [])[1] || '';
+  assert(mono.indexOf('var(--font-zh)') < mono.indexOf('var(--font-en)'), '--mono 里中文应在前：' + mono);
+  const bodyVar = (html.match(/--font-body:([^;]+);/) || [])[1] || '';
+  assert(bodyVar.indexOf('var(--font-zh)') < bodyVar.indexOf('var(--font-en)'), '--font-body 里中文应在前：' + bodyVar);
+  return '中文在前，英文兜底';
+});
+
+await check('面板文案：DISPLAY / NOTIFICATION，占位符为"使用默认"', () => {
+  assert(/显示设置 · DISPLAY/.test(html), '显示设置标题不对');
+  assert(/通知设置 · NOTIFICATION/.test(html), '通知设置标题不对');
+  assert(!/SERVERCHAN PUSH/.test(html), '旧的通知标题仍在');
+  assert(!/留空 = 使用默认/.test(html), '仍残留"留空 = 使用默认"');
+  assert((html.match(/placeholder="使用默认"/g) || []).length === 2, '两个字体框的占位符应为"使用默认"');
+  return 'DISPLAY / NOTIFICATION · 使用默认';
+});
+
 await check('填了字体后，失焦才应用（输入过程不应用）', () => {
   const { getEl, cssVars } = boot([]);
   getEl('fnZh').value = 'My Chinese Font';
