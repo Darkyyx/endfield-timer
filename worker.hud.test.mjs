@@ -96,29 +96,39 @@ const rawHud = getEl => getEl('stats').innerHTML;
 
 console.log('右上角：按状态计数');
 
-await check('四类状态各自计数：产物 / 正常 / 预警 / 危险', () => {
+await check('只有「正常」和「预警」两项计数', () => {
   const { getEl } = boot([
     { id: 'a', name: 'N1', prod: 0, cons: 0, stock: 0 },                       // 产销平衡 → 正常
     { id: 'b', name: 'N2', prod: 1, cons: 0, stock: 1000 },                    // 很久才爆 → 正常
     { id: 'c', name: 'W1', prod: 100, cons: 0, stock: CAP - 1000 },            // 10 分钟爆 → 预警
-    { id: 'd', name: 'D1', prod: 100, cons: 0, stock: CAP }                    // 已爆仓 → 危险
+    { id: 'd', name: 'D1', prod: 100, cons: 0, stock: CAP }                    // 已爆仓 → 预警
   ]);
   const t = statsOf(getEl);
-  assert(t.some(x => x === '产物 4'), '产物数不对：' + JSON.stringify(t));
+  assert(t.length === 2, '计数项应只有 正常/预警 两项，实际：' + JSON.stringify(t));
+  assert(/同步 /.test(rawHud(getEl)), '状态灯应仍然存在');
   assert(t.some(x => x === '正常 2'), '正常计数不对：' + JSON.stringify(t));
-  assert(t.some(x => x === '预警 1'), '预警计数不对：' + JSON.stringify(t));
-  assert(t.some(x => x === '危险 1'), '危险计数不对：' + JSON.stringify(t));
+  assert(t.some(x => x === '预警 2'), '已爆仓未并入预警：' + JSON.stringify(t));
   return t.join(' · ');
 });
 
-await check('已耗尽（存量为 0）也算危险', () => {
+await check('产物与危险两项已移除', () => {
+  const { getEl } = boot([{ id: 'a', name: 'X', prod: 0, cons: 0, stock: 0 }]);
+  const h = rawHud(getEl);
+  assert(!/产物/.test(h), '仍有「产物」统计：' + h);
+  assert(!/危险/.test(h), '仍有「危险」统计：' + h);
+  assert(!/class="danger"/.test(h), '仍有 danger 元素：' + h);
+  assert(!/\.stats \.danger b/.test(html), 'CSS 里仍有 danger 规则');
+  return '只剩 正常 / 预警 / 同步';
+});
+
+await check('已耗尽（存量为 0）并入预警', () => {
   const { getEl } = boot([
     { id: 'e', name: 'E1', prod: 0, cons: 10, stock: 0 },
     { id: 'f', name: 'W1', prod: 0, cons: 100, stock: 500 }
   ]);
   const t = statsOf(getEl);
-  assert(t.some(x => x === '危险 1'), '已耗尽未计入危险：' + JSON.stringify(t));
-  assert(t.some(x => x === '预警 1'), '即将耗尽未计入预警：' + JSON.stringify(t));
+  assert(t.some(x => x === '预警 2'), '已耗尽与即将耗尽都应计入预警：' + JSON.stringify(t));
+  assert(t.some(x => x === '正常 0'), '正常应为 0：' + JSON.stringify(t));
   return t.join(' · ');
 });
 
