@@ -24,9 +24,9 @@
        放在前面时中英文都由它渲染；若把纯拉丁字体放前面，中文会先落到系统字体上。 */
     --font-zh:"Noto Sans SC";
     --font-en:"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-    /* --mono 也接入设置：页面里 13 处（倒计时、数字框、HUD、页脚等）都走这个变量，
-       不接入的话数字区域不会跟随设置变化。 */
-    --mono:var(--font-zh),var(--font-en),ui-monospace,"Cascadia Mono",Consolas,monospace;
+    /* --mono-user 由脚本按设置覆盖（含引号规范化）；这里是没填任何字体时的原默认值。
+       页面里 13 处（倒计时、数字框、HUD、页脚等）都走这个变量。 */
+    --mono-user:ui-monospace,"Cascadia Mono",Consolas,monospace;
     --font-body:var(--font-zh),var(--font-en),sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0}
@@ -67,7 +67,7 @@
     background:linear-gradient(90deg,var(--yellow),rgba(255,210,30,0));
   }
   .logo{
-    font-family:var(--mono);font-size:12px;font-weight:700;
+    font-family:var(--mono-user);font-size:12px;font-weight:700;
     letter-spacing:.46em;color:var(--yellow);opacity:.9;
   }
   h1{
@@ -75,7 +75,7 @@
   }
   h1 span{color:var(--dim);font-weight:400;font-size:15px;letter-spacing:.15em;margin-left:12px}
   .stats{
-    font-family:var(--mono);font-size:14px;color:var(--dim);
+    font-family:var(--mono-user);font-size:14px;color:var(--dim);
     letter-spacing:.04em;display:flex;align-items:baseline;flex-wrap:wrap;
     gap:8px 15px;
   }
@@ -263,7 +263,7 @@
     background:rgba(255,210,30,.07);
   }
   .inp.num{
-    font-family:var(--mono);text-align:right;
+    font-family:var(--mono-user);text-align:right;
     font-variant-numeric:tabular-nums;letter-spacing:.01em;
     -moz-appearance:textfield;appearance:textfield;
   }
@@ -304,7 +304,7 @@
   /* 剩余容量 + 进度条 */
   .cell.remain{position:relative}
   .remain-val{
-    font-family:var(--mono);font-size:15.5px;text-align:right;
+    font-family:var(--mono-user);font-size:15.5px;text-align:right;
     font-variant-numeric:tabular-nums;color:#b6bfc7;
   }
   .bar{
@@ -322,18 +322,18 @@
   /* ============ 倒计时 ============ */
   .cd{text-align:right;padding-right:2px}
   .cd-time{
-    font-family:var(--mono);font-size:22px;font-weight:600;
+    font-family:var(--mono-user);font-size:22px;font-weight:600;
     letter-spacing:.02em;line-height:1.15;
     font-variant-numeric:tabular-nums;
     color:var(--dim);
   }
   .cd-sub{
-    font-family:var(--mono);font-size:12px;color:#4d5762;
+    font-family:var(--mono-user);font-size:12px;color:#4d5762;
     letter-spacing:.03em;margin-top:4px;white-space:nowrap;
     overflow:hidden;text-overflow:ellipsis;
   }
   .cd-eta{
-    font-family:var(--mono);font-size:11.5px;color:#3f4850;
+    font-family:var(--mono-user);font-size:11.5px;color:#3f4850;
     letter-spacing:.02em;margin-top:3px;white-space:nowrap;
     overflow:hidden;text-overflow:ellipsis;
     font-variant-numeric:tabular-nums;
@@ -398,7 +398,7 @@
   .btn.ghost:hover{color:var(--red);border-color:rgba(255,90,82,.55);background:rgba(255,90,82,.08)}
 
   .hint{
-    font-family:var(--mono);font-size:12.5px;color:#4b545d;letter-spacing:.05em;
+    font-family:var(--mono-user);font-size:12.5px;color:#4b545d;letter-spacing:.05em;
   }
 
   /* ============ 右下角开源地址 ============ */
@@ -431,7 +431,7 @@
   .ntPanel{margin-top:18px;border:1px solid var(--line);background:rgba(255,255,255,.014)}
   .ntPanel > summary{
     cursor:pointer;list-style:none;padding:13px 20px;
-    font-family:var(--mono);font-size:12.5px;letter-spacing:.18em;color:var(--dim);
+    font-family:var(--mono-user);font-size:12.5px;letter-spacing:.18em;color:var(--dim);
     transition:color .15s ease,background .15s ease;
   }
   .ntPanel > summary::-webkit-details-marker{display:none}
@@ -450,14 +450,14 @@
     letter-spacing:.1em;margin-bottom:6px;
   }
   .ntGrid .tip{
-    display:block;font-family:var(--mono);font-size:11.5px;color:#4b545d;
+    display:block;font-family:var(--mono-user);font-size:11.5px;color:#4b545d;
     letter-spacing:.03em;margin-top:6px;line-height:1.5;
   }
   .ntGrid input[type=text],.ntGrid input[type=number]{
     width:100%;font:inherit;font-size:14px;color:var(--txt);
     background:rgba(255,255,255,.03);border:1px solid var(--line);
     padding:9px 11px;outline:none;border-radius:0;
-    font-family:var(--mono);transition:border-color .15s ease;
+    font-family:var(--mono-user);transition:border-color .15s ease;
   }
   .ntGrid input[type=text]:focus,.ntGrid input[type=number]:focus{
     border-color:var(--yellow);background:rgba(255,210,30,.06);
@@ -476,7 +476,7 @@
   .btn.ghost.red:hover{color:var(--red);border-color:rgba(255,90,82,.55);background:rgba(255,90,82,.08)}
 
   .ntMsg{
-    font-family:var(--mono);font-size:12.5px;letter-spacing:.03em;
+    font-family:var(--mono-user);font-size:12.5px;letter-spacing:.03em;
     color:#5c666f;line-height:1.6;word-break:break-all;
   }
   .ntMsg.is-ok{color:var(--green-bright)}
@@ -489,7 +489,7 @@
 
   .foot{
     margin-top:44px;text-align:center;
-    font-family:var(--mono);font-size:12.5px;
+    font-family:var(--mono-user);font-size:12.5px;
     letter-spacing:.3em;color:#3a424a;
   }
   /* 中文配超大等宽字距会散，这里单独收一下；版本号用 <b> 恢复常规字距，读起来清楚 */
@@ -557,7 +557,7 @@
         </label>
       </div>
       <div class="ntActions">
-        <span class="ntMsg">未填写则使用默认字体 · 回车或失焦才应用 · 只保存在本机，不同步到 Worker</span>
+        <span class="ntMsg">未填写则使用默认字体 · 只保存在本机，不同步到 Worker</span>
       </div>
     </div>
   </details>
@@ -613,7 +613,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.10.1</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.10.2</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -627,7 +627,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.10.1';
+  const PAGE_VERSION = '1.10.2';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1812,11 +1812,26 @@
 
   /* ================= 显示设置（字体，仅存本机） ================= */
   const FONT_KEY = 'endfield_font_v1';
-  /* 实际生效顺序：英文字体在前、中文字体在后。
-     CSS 的回退是按"字符"找第一个包含该字符的字体，所以英文/数字走英文字体，
-     中文会自动落到中文字体——这也是中文字体放在配置后面的原因。 */
-  const DEFAULT_EN = '"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif';
+  /* 空值时的兜底字体栈：保持改造前的默认观感。
+     注意"纯拉丁默认"（Barlow）与"数字默认"（Cascadia Mono/Consolas）是两套，
+     不填任何东西时必须各归各位，否则数字区域会跟着变。 */
   const DEFAULT_ZH = '"Noto Sans SC"';
+  const DEFAULT_LATIN = '"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif';
+  const DEFAULT_MONO = 'ui-monospace,"Cascadia Mono",Consolas,monospace';
+
+  /**
+   * 把用户输入的字族名安全地拼成 CSS 值。
+   * 关键：含空格的字族名必须加引号。`Maple Mono NF CN` 若不加引号会被 CSS 解析成
+   * Maple / Mono / NF / CN 四个字体名，全都匹配不上 → 静默失效。
+   * 以逗号分隔时视为用户自己写了完整字体栈，原样保留以便使用 generic family。
+   */
+  function quoteFamily(raw) {
+    const s = String(raw == null ? '' : raw).trim();
+    if (!s) return '';
+    if (s.indexOf(',') >= 0) return s;
+    if (/^["'].*["']$/.test(s)) return s;
+    return /[^\w-]/.test(s) ? '"' + s.replace(/"/g, '') + '"' : s;
+  }
 
   function readFonts() {
     try {
@@ -1833,8 +1848,13 @@
   function applyFonts(cfg) {
     const root = document.documentElement;
     if (!root || !root.style || typeof root.style.setProperty !== 'function') return;
-    root.style.setProperty('--font-en', cfg.en || DEFAULT_EN);
-    root.style.setProperty('--font-zh', cfg.zh || DEFAULT_ZH);
+    const zh = quoteFamily(cfg.zh) || DEFAULT_ZH;
+    const en = quoteFamily(cfg.en) || DEFAULT_LATIN;
+    root.style.setProperty('--font-zh', zh);
+    root.style.setProperty('--font-en', en);
+    // 数字区域：优先用户填的字体，都没填时回落到原来的等宽默认，保持原观感
+    const custom = quoteFamily(cfg.zh) || quoteFamily(cfg.en);
+    root.style.setProperty('--mono-user', custom ? custom + ',' + DEFAULT_MONO : DEFAULT_MONO);
   }
 
   (function initFonts() {

@@ -105,19 +105,47 @@ await check('未填时使用默认字体变量', () => {
   return '默认值生效';
 });
 
-await check('字体设置覆盖到全部字体变量（含数字区域用的 --mono）', () => {
+await check('含空格的字族名自动加引号（不加引号会被 CSS 当成多个字体名而失效）', () => {
   const { getEl, cssVars } = boot([]);
   getEl('fnZh').value = 'Maple Mono NF CN';
-  getEl('fnEn').value = 'Consolas';
   getEl('fnZh').listeners.blur.forEach(fn => fn());
+  assert(cssVars['--font-zh'] === '"Maple Mono NF CN"', '中文未加引号：' + cssVars['--font-zh']);
+  assert((cssVars['--mono-user'] || '').indexOf('"Maple Mono NF CN",') === 0, '数字区未用该字体：' + cssVars['--mono-user']);
+  return cssVars['--mono-user'];
+});
+
+await check('单字字体名不加引号；已带引号的不重复加', () => {
+  const { getEl, cssVars } = boot([]);
+  getEl('fnEn').value = 'Consolas';
   getEl('fnEn').listeners.blur.forEach(fn => fn());
-  assert(/Maple Mono NF CN/.test(cssVars['--font-zh'] || ''), '中文未生效：' + cssVars['--font-zh']);
-  assert(/Consolas/.test(cssVars['--font-en'] || ''), '英文未生效：' + cssVars['--font-en']);
-  // 关键：CSS 里 --mono / --font-body 必须引用这两个变量，否则数字区域不会跟随
-  assert(/--mono:var\(--font-zh\),var\(--font-en\)/.test(html), '--mono 未接入字体设置');
-  assert(/--font-body:var\(--font-zh\),var\(--font-en\)/.test(html), '--font-body 未接入字体设置');
-  assert(!/--mono:ui-monospace/.test(html), '--mono 仍是写死的字体栈');
-  return '--mono 与 --font-body 都引用设置值';
+  assert(cssVars['--font-en'] === 'Consolas', '单字名被加了引号：' + cssVars['--font-en']);
+  getEl('fnEn').value = '"Already Quoted"';
+  getEl('fnEn').listeners.blur.forEach(fn => fn());
+  assert(cssVars['--font-en'] === '"Already Quoted"', '重复加引号：' + cssVars['--font-en']);
+  return 'Consolas / "Already Quoted"';
+});
+
+await check('用逗号写完整字体栈时原样保留', () => {
+  const { getEl, cssVars } = boot([]);
+  getEl('fnEn').value = 'Maple Mono NF CN, monospace';
+  getEl('fnEn').listeners.blur.forEach(fn => fn());
+  assert(cssVars['--font-en'] === 'Maple Mono NF CN, monospace', '逗号写法被改动：' + cssVars['--font-en']);
+  return cssVars['--font-en'];
+});
+
+await check('全空时数字区回到原默认等宽栈（不被 Barlow 接管）', () => {
+  const { cssVars } = boot([]);
+  const mono = cssVars['--mono-user'] || '';
+  assert(/Cascadia Mono/.test(mono), '数字默认栈不对：' + mono);
+  assert(!/Barlow/.test(mono), '数字区不该被 Barlow 接管：' + mono);
+  return mono;
+});
+
+await check('数字区域已全部改用 --mono-user', () => {
+  const uses = (html.match(/font-family:var\(--mono-user\)/g) || []).length;
+  assert(uses >= 10, '--mono-user 使用处过少：' + uses);
+  assert(!/font-family:var\(--mono\)/.test(html), '仍有地方在用旧的 --mono 变量');
+  return uses + ' 处';
 });
 
 await check('中文字体排在英文字体之前（中文字体自带拉丁字形时能接管英文）', () => {
@@ -125,8 +153,6 @@ await check('中文字体排在英文字体之前（中文字体自带拉丁字�
   const enIdx = html.indexOf('--font-en:');
   assert(zhIdx > 0 && enIdx > 0, '未找到字体变量');
   assert(zhIdx < enIdx, '配置顺序应为中文在前');
-  const mono = (html.match(/--mono:([^;]+);/) || [])[1] || '';
-  assert(mono.indexOf('var(--font-zh)') < mono.indexOf('var(--font-en)'), '--mono 里中文应在前：' + mono);
   const bodyVar = (html.match(/--font-body:([^;]+);/) || [])[1] || '';
   assert(bodyVar.indexOf('var(--font-zh)') < bodyVar.indexOf('var(--font-en)'), '--font-body 里中文应在前：' + bodyVar);
   return '中文在前，英文兜底';
@@ -136,9 +162,14 @@ await check('面板文案：DISPLAY / NOTIFICATION，占位符为"使用默认"'
   assert(/显示设置 · DISPLAY/.test(html), '显示设置标题不对');
   assert(/通知设置 · NOTIFICATION/.test(html), '通知设置标题不对');
   assert(!/SERVERCHAN PUSH/.test(html), '旧的通知标题仍在');
-  assert(!/留空 = 使用默认/.test(html), '仍残留"留空 = 使用默认"');
+  assert(html.indexOf('留空 = 使用默认') < 0, '仍残留"留空 = 使用默认"');
+  // 只看显示设置面板里的提示文字（代码注释里保留行为说明是合理的，不算残留）
+  const panel = html.slice(html.indexOf('id="fontPanel"'), html.indexOf('id="ntPanel"'));
+  const hint = (panel.match(/<span class="ntMsg">([\s\S]*?)<\/span>/) || [])[1] || '';
+  assert(hint.indexOf('回车或失焦才应用') < 0, '界面提示仍写"回车或失焦才应用"：' + hint);
+  assert(hint.indexOf('未填写则使用默认字体') >= 0, '缺少默认字体说明：' + hint);
   assert((html.match(/placeholder="使用默认"/g) || []).length === 2, '两个字体框的占位符应为"使用默认"');
-  return 'DISPLAY / NOTIFICATION · 使用默认';
+  return hint;
 });
 
 await check('填了字体后，失焦才应用（输入过程不应用）', () => {
