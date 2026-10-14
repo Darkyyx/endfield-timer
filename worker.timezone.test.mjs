@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import worker, { __test } from './worker.js';
 
 const {
-  fmtInZone, fmtClock, normZone, zoneOffsetHours, offsetLabel, tzLabel,
+  fmtInZone, fmtClock, tzOffset, tzLabel, posixZone,
   quotaResetText, quotaMessage, composeItemMessage, effectiveConfig, DEFAULT_TZ
 } = __test;
 
@@ -15,185 +15,129 @@ const check = async (name, fn) => {
 };
 const assert = (c, m) => { if (!c) throw new Error(m); };
 
-/* 固定时刻 */
-const W = Date.UTC(2026, 0, 15, 6, 40, 0);   // 冬令时期间（北半球）
-const S = Date.UTC(2026, 6, 15, 6, 40, 0);   // 夏令时期间（北半球）
-const N = Date.UTC(2026, 4, 29, 20, 0, 0);   // 跨日用
+/* 固定时刻：2026-05-29 06:40 UTC */
+const T = Date.UTC(2026, 4, 29, 6, 40, 0);
+/* UTC 20:00（跨日用） */
+const N = Date.UTC(2026, 4, 29, 20, 0, 0);
 
 console.log('A. 时刻换算：不再用运行时本地时区（Worker 上是 UTC）');
 
 await check('Cloudflare 运行在 UTC —— 这正是要修掉的问题', () => {
-  assert(new Date(W).getUTCHours() === 6, 'UTC 小时应为 6');
+  assert(new Date(T).getUTCHours() === 6, 'UTC 小时应为 6');
   return 'getHours() 在 Worker 里 = UTC 06:40';
 });
 
-await check('Asia/Shanghai 得到 +8 小时后的时刻（核心修复）', () => {
-  assert(fmtInZone(W, 'Asia/Shanghai') === '14:40', '应为 14:40，实际 ' + fmtInZone(W, 'Asia/Shanghai'));
+await check('UTC+8 得到 +8 小时后的时刻（核心修复）', () => {
+  assert(fmtInZone(T, 8) === '14:40', '应为 14:40，实际 ' + fmtInZone(T, 8));
   return '06:40Z → 14:40';
 });
 
-await check('各时区换算正确', () => {
-  const cases = [
-    ['UTC', '06:40'], ['Asia/Tokyo', '15:40'], ['Asia/Bangkok', '13:40'],
-    ['America/New_York', '01:40'], ['America/Los_Angeles', '22:40']
-  ];
-  cases.forEach(([z, want]) => {
-    const got = fmtInZone(W, z);
-    assert(got === want, z + ' 应为 ' + want + '，实际 ' + got);
+await check('各偏移换算正确（-12 到 +14）', () => {
+  const cases = [[0, '06:40'], [9, '15:40'], [7, '13:40'], [-5, '01:40'], [-8, '22:40'],
+    [5.5, '12:10'], [14, '20:40'], [-12, '18:40']];
+  cases.forEach(([tz, want]) => {
+    const got = fmtInZone(T, tz);
+    assert(got === want, 'UTC' + tz + ' 应为 ' + want + '，实际 ' + got);
   });
-  return cases.map(([z, w]) => z.split('/').pop() + '→' + w).join('  ');
+  return cases.map(([tz, w]) => tz + '→' + w).join('  ');
 });
 
-await check('半小时/三刻钟时区', () => {
-  assert(fmtInZone(W, 'Asia/Kolkata') === '12:10', '印度应为 12:10，实际 ' + fmtInZone(W, 'Asia/Kolkata'));
-  assert(fmtInZone(W, 'Asia/Kathmandu') === '12:25', '尼泊尔应为 12:25，实际 ' + fmtInZone(W, 'Asia/Kathmandu'));
-  return '12:10 / 12:25';
-});
-
-await check('跨日：UTC 20:00 在上海是次日 04:00', () => {
-  assert(fmtInZone(N, 'Asia/Shanghai') === '04:00', '实际 ' + fmtInZone(N, 'Asia/Shanghai'));
-  assert(fmtInZone(N, 'Asia/Shanghai', true) === '05-30 04:00', '实际 ' + fmtInZone(N, 'Asia/Shanghai', true));
+await check('跨日：UTC 20:00 在 UTC+8 是次日 04:00', () => {
+  assert(fmtInZone(N, 8) === '04:00', '实际 ' + fmtInZone(N, 8));
+  assert(fmtInZone(N, 8, true) === '05-30 04:00', '实际 ' + fmtInZone(N, 8, true));
   return '04:00 / 05-30 04:00';
 });
 
-console.log('\nB. 夏令时（用固定偏移做不到的部分）');
+console.log('\nB. 偏移解析与 POSIX 串');
 
-await check('柏林：冬 +1 / 夏 +2', () => {
-  assert(zoneOffsetHours(W, 'Europe/Berlin') === 1, '冬季实际 ' + zoneOffsetHours(W, 'Europe/Berlin'));
-  assert(zoneOffsetHours(S, 'Europe/Berlin') === 2, '夏季实际 ' + zoneOffsetHours(S, 'Europe/Berlin'));
-  return '冬 +1 / 夏 +2';
+await check('POSIX 时区串符号与常识相反（UTC+8 → "UTC-8"）', () => {
+  assert(posixZone(8) === 'UTC-8', '实际 ' + posixZone(8));
+  assert(posixZone(0) === 'UTC', '实际 ' + posixZone(0));
+  assert(posixZone(-5) === 'UTC+5', '实际 ' + posixZone(-5));
+  assert(posixZone(5.5) === 'UTC-5:30', '实际 ' + posixZone(5.5));
+  return 'UTC-8 / UTC / UTC+5 / UTC-5:30';
 });
 
-await check('纽约：冬 -5 / 夏 -4', () => {
-  assert(zoneOffsetHours(W, 'America/New_York') === -5, '冬季实际 ' + zoneOffsetHours(W, 'America/New_York'));
-  assert(zoneOffsetHours(S, 'America/New_York') === -4, '夏季实际 ' + zoneOffsetHours(S, 'America/New_York'));
-  return '冬 -5 / 夏 -4';
+await check('非法或缺失偏移回落到 +8', () => {
+  assert(tzOffset(undefined) === 8, 'undefined');
+  assert(tzOffset('abc') === 8, '非数字');
+  assert(tzOffset(99) === 8, '超出范围');
+  assert(tzOffset(-20) === 8, '低于范围');
+  assert(tzOffset('8') === 8, '字符串数字应被接受');
+  assert(tzOffset(5.5) === 5.5, '半小时应保留');
+  assert(tzOffset(-12) === -12 && tzOffset(14) === 14, '边界值应接受');
+  return '全部回落到 +8，合法值保留';
 });
 
-await check('悉尼：南半球相反，冬 +11 / 夏 +10', () => {
-  assert(zoneOffsetHours(W, 'Australia/Sydney') === 11, '1 月实际 ' + zoneOffsetHours(W, 'Australia/Sydney'));
-  assert(zoneOffsetHours(S, 'Australia/Sydney') === 10, '7 月实际 ' + zoneOffsetHours(S, 'Australia/Sydney'));
-  return '1 月 +11 / 7 月 +10';
+await check('偏移标签', () => {
+  assert(tzLabel(8) === 'UTC+8', tzLabel(8));
+  assert(tzLabel(-5) === 'UTC-5', tzLabel(-5));
+  assert(tzLabel(5.5) === 'UTC+5:30', tzLabel(5.5));
+  assert(tzLabel(0) === 'UTC+0', tzLabel(0));
+  return 'UTC+8 / UTC-5 / UTC+5:30 / UTC+0';
 });
 
-await check('上海、迪拜无夏令时，全年恒定', () => {
-  assert(zoneOffsetHours(W, 'Asia/Shanghai') === zoneOffsetHours(S, 'Asia/Shanghai'), '上海应恒定');
-  assert(zoneOffsetHours(W, 'Asia/Dubai') === zoneOffsetHours(S, 'Asia/Dubai'), '迪拜应恒定');
-  return '上海 +8 / 迪拜 +4';
-});
+console.log('\nC. 额度重置文案跟着偏移走');
 
-await check('偏移标签含夏令时后的值', () => {
-  assert(offsetLabel(zoneOffsetHours(W, 'Europe/Berlin')) === 'UTC+1', '柏林冬季');
-  assert(offsetLabel(zoneOffsetHours(S, 'Europe/Berlin')) === 'UTC+2', '柏林夏季');
-  assert(offsetLabel(zoneOffsetHours(W, 'Asia/Kathmandu')) === 'UTC+5:45', '尼泊尔 +5:45');
-  return 'UTC+1 / UTC+2 / UTC+5:45';
-});
-
-console.log('\nC. 标识符校验与回落');
-
-await check('非法标识符一律回落到默认时区', () => {
-  assert(normZone('bogus') === DEFAULT_TZ, 'bogus 实际 ' + normZone('bogus'));
-  assert(normZone('') === DEFAULT_TZ, '空串');
-  assert(normZone(null) === DEFAULT_TZ, 'null');
-  assert(normZone('Asia/Nowhere') === DEFAULT_TZ, '不存在的地区');
-  assert(normZone('../../etc/passwd') === DEFAULT_TZ, '路径穿越样式');
-  return '全部 → ' + DEFAULT_TZ;
-});
-
-await check('Etc/GMT±N 被拒绝（符号与直觉相反，容易误用）', () => {
-  assert(normZone('Etc/GMT+8') === DEFAULT_TZ, '实际 ' + normZone('Etc/GMT+8'));
-  assert(normZone('Etc/GMT-8') === DEFAULT_TZ, '实际 ' + normZone('Etc/GMT-8'));
-  return 'Etc/* → 默认时区';
-});
-
-await check('合法标识符原样保留（含三段式与 UTC）', () => {
-  assert(normZone('Asia/Shanghai') === 'Asia/Shanghai', normZone('Asia/Shanghai'));
-  assert(normZone('America/Argentina/Buenos_Aires') === 'America/Argentina/Buenos_Aires', '三段式被改动了');
-  assert(normZone('UTC') === 'UTC', 'UTC 被改动了');
-  assert(normZone('  Asia/Tokyo  ') === 'Asia/Tokyo', '未去空白');
-  return 'Asia/Shanghai / 三段式 / UTC';
-});
-
-await check('时区展示名 = 标识符 + 当前偏移', () => {
-  assert(tzLabel('Asia/Shanghai', W) === 'Asia/Shanghai（UTC+8）', tzLabel('Asia/Shanghai', W));
-  assert(/Europe\/Berlin（UTC\+[12]）/.test(tzLabel('Europe/Berlin', W)), tzLabel('Europe/Berlin', W));
-  return tzLabel('Asia/Shanghai', W);
-});
-
-console.log('\nD. 额度重置文案');
-
-await check('Cloudflare 按 UTC 零点重置 → 本地钟点随时区变化', () => {
-  assert(quotaResetText('Asia/Shanghai') === '每天 8:00 点重置', '上海实际 ' + quotaResetText('Asia/Shanghai'));
-  assert(quotaResetText('Asia/Tokyo') === '每天 9:00 点重置', '东京实际 ' + quotaResetText('Asia/Tokyo'));
-  assert(quotaResetText('UTC') === '每天 0:00 点重置', 'UTC 实际 ' + quotaResetText('UTC'));
-  assert(quotaResetText('Asia/Kolkata') === '每天 5:30 点重置', '印度实际 ' + quotaResetText('Asia/Kolkata'));
-  return '上海 8:00 / 东京 9:00 / UTC 0:00 / 印度 5:30';
+await check('Cloudflare 按 UTC 零点重置 → 本地钟点随偏移变化', () => {
+  assert(quotaResetText(8) === '每天 8:00 点重置', 'UTC+8 实际 ' + quotaResetText(8));
+  assert(quotaResetText(9) === '每天 9:00 点重置', 'UTC+9 实际 ' + quotaResetText(9));
+  assert(quotaResetText(0) === '每天 0:00 点重置', 'UTC+0 实际 ' + quotaResetText(0));
+  assert(quotaResetText(5.5) === '每天 5:30 点重置', 'UTC+5:30 实际 ' + quotaResetText(5.5));
+  assert(quotaResetText(13) === '每天 13:00 点重置', 'UTC+13 实际 ' + quotaResetText(13));
+  return '8 / 9 / 0 / 5:30 / 13';
 });
 
 await check('负偏移跨到前一天', () => {
-  const got = quotaResetText('America/Los_Angeles');
-  assert(/^每天（前一天）/.test(got), '实际 ' + got);
-  return got;
+  assert(quotaResetText(-5) === '每天（前一天）19:00 点重置', 'UTC-5 实际 ' + quotaResetText(-5));
+  assert(quotaResetText(-12) === '每天（前一天）12:00 点重置', 'UTC-12 实际 ' + quotaResetText(-12));
+  return quotaResetText(-5);
 });
 
-await check('时区未知时只说"次日重置"，不写死钟点', () => {
+await check('时区未知时不写死钟点，只说"次日重置"', () => {
   assert(quotaResetText(undefined) === '次日重置', '实际 ' + quotaResetText(undefined));
   assert(quotaResetText('') === '次日重置', '实际 ' + quotaResetText(''));
-  assert(quotaResetText(null) === '次日重置', '实际 ' + quotaResetText(null));
   return '次日重置';
 });
 
-await check('quotaMessage 使用同一时区', () => {
-  assert(/每天 9:00 点重置$/.test(quotaMessage('Asia/Tokyo')), quotaMessage('Asia/Tokyo'));
-  assert(!/每天 8:00/.test(quotaMessage('Asia/Tokyo')), '不该残留上海的钟点：' + quotaMessage('Asia/Tokyo'));
-  return quotaMessage('Asia/Tokyo');
+await check('quotaMessage 使用同一偏移', () => {
+  assert(/每天 9:00 点重置$/.test(quotaMessage(9)), quotaMessage(9));
+  assert(!/每天 8:00/.test(quotaMessage(9)), '不该残留 +8 的钟点：' + quotaMessage(9));
+  return quotaMessage(9);
 });
 
-console.log('\nE. 通知正文使用所选时区');
+console.log('\nD. 通知正文使用所选偏移');
 
 const item = {
   level: 1,
-  row: { id: 'a', name: '源矿', remark: '装满：液体A', region: 'wuling', prod: 20, cons: 0, stock: 88000, ts: W }
+  row: { id: 'a', name: '源矿', remark: '装满：液体A', region: 'wuling', prod: 20, cons: 0, stock: 88000, ts: T }
 };
 
-await check('同一份数据在不同时区给出正确时刻', () => {
-  const sh = composeItemMessage(item, W, 'Asia/Shanghai');
-  const ny = composeItemMessage(item, W, 'America/New_York');
-  assert(sh.desp.indexOf('16:20') >= 0, '上海应为 16:20：' + sh.desp);
-  assert(ny.desp.indexOf('03:20') >= 0, '纽约应为 03:20：' + ny.desp);
-  return sh.desp + '  |  ' + ny.desp;
+await check('同一份数据在不同偏移给出相差 8 小时的时刻', () => {
+  const a = composeItemMessage(item, T, 8);
+  const b = composeItemMessage(item, T, 0);
+  assert(a.desp.indexOf('16:20') >= 0, 'UTC+8 应为 16:20：' + a.desp);
+  assert(b.desp.indexOf('08:20') >= 0, 'UTC+0 应为 08:20：' + b.desp);
+  return a.desp + '  |  ' + b.desp;
 });
 
 await check('正文格式不变，标题与分钟数不受时区影响', () => {
-  const a = composeItemMessage(item, W, 'Asia/Shanghai');
-  const b = composeItemMessage(item, W, 'America/Los_Angeles');
+  const a = composeItemMessage(item, T, 8);
+  const b = composeItemMessage(item, T, -5);
   assert(/^预计 \d{2}:\d{2} 爆仓（约 100 分钟后）$/.test(a.desp), '格式变了：' + a.desp);
   assert(a.title === b.title, '标题不该随时区变化');
   assert(a.desp.replace(/\d{2}:\d{2}/, 'X') === b.desp.replace(/\d{2}:\d{2}/, 'X'), '除时刻外应一致');
   return a.title;
 });
 
-await check('同一时刻、同一数据，柏林比伦敦晚一小时（夏令时差异）', () => {
-  // 用同一个 ms 才是可比实验：换时间戳会让数据外推量也跟着变
-  const berlin = composeItemMessage(item, W, 'Europe/Berlin');
-  const london = composeItemMessage(item, W, 'Europe/London');
-  const hb = Number((berlin.desp.match(/(\d{2}):\d{2}/) || [])[1]);
-  const hl = Number((london.desp.match(/(\d{2}):\d{2}/) || [])[1]);
-  // 06:40Z + 100 分钟 = 08:20（伦敦 UTC+0）；柏林再 +1 小时 = 09:20
-  assert(hl === 8, '伦敦冬季应为 08:xx（UTC+0）：' + london.desp);
-  assert(hb === 9, '柏林冬季应为 09:xx（UTC+1）：' + berlin.desp);
-  assert(hb - hl === 1, '两者应正好差一小时');
-  return london.desp + '  vs  ' + berlin.desp;
+await check('缺少偏移时按默认 +8 渲染', () => {
+  const noTz = composeItemMessage(item, T, undefined);
+  const plus8 = composeItemMessage(item, T, 8);
+  assert(noTz.desp === plus8.desp, '默认应为 +8：' + noTz.desp + ' vs ' + plus8.desp);
+  return noTz.desp;
 });
 
-await check('夏令时期间同一城市的偏移确实变了（换时区不用改设置）', () => {
-  // 冬 06:40Z 柏林 07:40；夏 06:40Z 柏林 08:40 —— 偏移从 +1 变 +2
-  assert(fmtInZone(W, 'Europe/Berlin') === '07:40', '冬季实际 ' + fmtInZone(W, 'Europe/Berlin'));
-  assert(fmtInZone(S, 'Europe/Berlin') === '08:40', '夏季实际 ' + fmtInZone(S, 'Europe/Berlin'));
-  return '07:40 → 08:40（同一时刻的钟点差）';
-});
-
-console.log('\nF. 时区配置链路');
+console.log('\nE. 时区配置链路');
 
 function makeKV(seed) {
   const m = new Map(seed || []);
@@ -211,123 +155,112 @@ const req = (body) => new Request('https://w.example/sync', {
 });
 const baseEnv = (kv) => ({ STATE: kv, SC_SENDKEY: 'sctp1a', SYNC_TOKEN: 'tok', WARN_SECONDS: 1800 });
 
-await check('/sync 上报的 timeZone 标识符写进 meta:config', async () => {
+await check('/sync 上报的 timeZone 偏移写进 meta:config', async () => {
   const env = baseEnv(makeKV());
-  await worker.fetch(req({ v: 2, clientId: 'c1', clientHost: 'p.example', dirty: true, warnMinutes: 30, timeZone: 'Europe/Berlin', rows: [] }), env, {});
+  await worker.fetch(req({ v: 2, clientId: 'c1', clientHost: 'p.example', dirty: true, warnMinutes: 30, timeZone: 9, rows: [] }), env, {});
   const meta = await env.STATE.get('meta:config', 'json');
-  assert(meta.timeZone === 'Europe/Berlin', '实际 ' + JSON.stringify(meta.timeZone));
+  assert(meta.timeZone === 9, '实际 ' + JSON.stringify(meta.timeZone));
   return 'timeZone = ' + meta.timeZone;
 });
 
-await check('非法标识符被规范化后再落盘', async () => {
+await check('字符串形式的偏移也能接受', async () => {
   const env = baseEnv(makeKV());
-  await worker.fetch(req({ v: 2, clientId: 'c1', clientHost: 'p.example', dirty: true, warnMinutes: 30, timeZone: 'Evil/../Zone', rows: [] }), env, {});
+  await worker.fetch(req({ v: 2, clientId: 'c1', clientHost: 'p.example', dirty: true, warnMinutes: 30, timeZone: '9', rows: [] }), env, {});
   const meta = await env.STATE.get('meta:config', 'json');
-  assert(meta.timeZone === DEFAULT_TZ, '实际 ' + JSON.stringify(meta.timeZone));
-  return 'Evil/../Zone → ' + meta.timeZone;
+  assert(meta.timeZone === 9, '实际 ' + JSON.stringify(meta.timeZone));
+  return '"9" → 9';
+});
+
+await check('越界偏移被规范为默认值', async () => {
+  const env = baseEnv(makeKV());
+  await worker.fetch(req({ v: 2, clientId: 'c1', clientHost: 'p.example', dirty: true, warnMinutes: 30, timeZone: 99, rows: [] }), env, {});
+  const meta = await env.STATE.get('meta:config', 'json');
+  assert(meta.timeZone === DEFAULT_TZ, '越界应回落到 ' + DEFAULT_TZ + '，实际 ' + JSON.stringify(meta.timeZone));
+  return '99 → ' + meta.timeZone;
 });
 
 await check('页面没上报时区时保留原值（旧版页面不会把设置清掉）', async () => {
-  const env = baseEnv(makeKV([['meta:config', JSON.stringify({ warnMinutes: 30, timeZone: 'America/Chicago', alertTypes: { full: true, empty: true } })]]));
+  const env = baseEnv(makeKV([['meta:config', JSON.stringify({ warnMinutes: 30, timeZone: -5, alertTypes: { full: true, empty: true } })]]));
   await worker.fetch(req({ v: 2, clientId: 'c1', clientHost: 'p.example', dirty: true, warnMinutes: 30, rows: [] }), env, {});
   const meta = await env.STATE.get('meta:config', 'json');
-  assert(meta.timeZone === 'America/Chicago', '不该被覆盖，实际 ' + JSON.stringify(meta.timeZone));
-  return '保留 America/Chicago';
+  assert(meta.timeZone === -5, '不该被覆盖，实际 ' + JSON.stringify(meta.timeZone));
+  return '保留 -5';
 });
 
 await check('effectiveConfig 读出 timeZone，缺失时用默认', async () => {
-  const a = await effectiveConfig({ STATE: makeKV([['meta:config', JSON.stringify({ timeZone: 'Asia/Tokyo' })]]) }, { WARN_SECONDS: 1800 });
-  assert(a.timeZone === 'Asia/Tokyo', '实际 ' + a.timeZone);
+  const a = await effectiveConfig({ STATE: makeKV([['meta:config', JSON.stringify({ timeZone: 9 })]]) }, { WARN_SECONDS: 1800 });
+  assert(a.timeZone === 9, '实际 ' + a.timeZone);
   const b = await effectiveConfig({ STATE: makeKV() }, { WARN_SECONDS: 1800 });
   assert(b.timeZone === DEFAULT_TZ, '缺失应为 ' + DEFAULT_TZ + '，实际 ' + b.timeZone);
-  const c = await effectiveConfig({ STATE: makeKV([['meta:config', JSON.stringify({ timeZone: 'nope' })]]) }, { WARN_SECONDS: 1800 });
+  const c = await effectiveConfig({ STATE: makeKV([['meta:config', JSON.stringify({ timeZone: 'x' })]]) }, { WARN_SECONDS: 1800 });
   assert(c.timeZone === DEFAULT_TZ, '非法应为 ' + DEFAULT_TZ + '，实际 ' + c.timeZone);
-  return 'Asia/Tokyo / ' + DEFAULT_TZ + ' / ' + DEFAULT_TZ;
+  return '9 / ' + DEFAULT_TZ + ' / ' + DEFAULT_TZ;
 });
 
 await check('环境变量 TIME_ZONE 作为 meta 缺失时的兜底', async () => {
-  const r = await effectiveConfig({ STATE: makeKV() }, { WARN_SECONDS: 1800, TIME_ZONE: 'Australia/Sydney' });
-  assert(r.timeZone === 'Australia/Sydney', '实际 ' + r.timeZone);
-  return 'TIME_ZONE = Australia/Sydney';
+  const r = await effectiveConfig({ STATE: makeKV() }, { WARN_SECONDS: 1800, TIME_ZONE: '-5' });
+  assert(r.timeZone === -5, '实际 ' + r.timeZone);
+  return 'TIME_ZONE = -5';
 });
 
 await check('/sync 响应带回 timeZone 与 quotaReset', async () => {
-  const env = baseEnv(makeKV([['meta:config', JSON.stringify({ timeZone: 'Asia/Tokyo', warnMinutes: 30, alertTypes: { full: true, empty: true } })]]));
+  const env = baseEnv(makeKV([['meta:config', JSON.stringify({ timeZone: 9, warnMinutes: 30, alertTypes: { full: true, empty: true } })]]));
   const j = await (await worker.fetch(req({ v: 2, clientId: 'c1', clientHost: 'p.example', dirty: true, warnMinutes: 30, rows: [] }), env, {})).json();
-  assert(j.timeZone === 'Asia/Tokyo', 'timeZone 实际 ' + j.timeZone);
+  assert(j.timeZone === 9, 'timeZone 实际 ' + j.timeZone);
   assert(j.quotaReset === '每天 9:00 点重置', 'quotaReset 实际 ' + j.quotaReset);
-  return 'timeZone=Asia/Tokyo, quotaReset=' + j.quotaReset;
+  return 'timeZone=9, quotaReset=' + j.quotaReset;
 });
 
-console.log('\nG. 页面侧两级下拉框');
+console.log('\nF. 页面侧时区下拉框');
 
-await check('有两个下拉框：地区 + 城市，且都是中文地区名', () => {
-  assert(/id="ntTzRegion"/.test(html), '缺少地区下拉框');
-  assert(/id="ntTzCity"/.test(html), '缺少城市下拉框');
-  const src = html.slice(html.indexOf('const TZ_CURATED'), html.indexOf('const TZ_ALIAS'));
-  ['亚洲', '欧洲', '美洲', '大洋洲', '非洲', 'UTC', '南极洲'].forEach(r => {
-    assert(src.indexOf('      ' + r + ': [') >= 0, '缺少中文地区 ' + r);
-  });
-  ['Asia', 'Europe', 'America', 'Oceania', 'Africa', 'Pacific'].forEach(r => {
-    assert(src.indexOf('      ' + r + ': [') < 0, '仍残留英文地区名 ' + r);
-  });
-  return '亚洲/欧洲/美洲/大洋洲/非洲/UTC/南极洲';
+await check('只有一个时区下拉框（已回退两级级联）', () => {
+  assert(/id="ntTz"/.test(html), '缺少时区下拉框');
+  assert(!/id="ntTzRegion"/.test(html), '仍残留地区下拉框');
+  assert(!/id="ntTzCity"/.test(html), '仍残留城市下拉框');
+  assert(!/TZ_CURATED|buildTzIndex|fillRegions|fillCities/.test(html), '仍残留级联代码');
+  return '单个 ntTz';
 });
 
-await check('预警时间与地区、城市相邻（同一行），地址与令牌不再独占整行', () => {
+await check('预警时间与时区相邻（同一行）', () => {
   const iWarn = html.indexOf('id="ntWarn"');
-  const iRegion = html.indexOf('id="ntTzRegion"');
-  const iCity = html.indexOf('id="ntTzCity"');
-  const iUrl = html.indexOf('id="ntUrl"');
-  const iToken = html.indexOf('id="ntToken"');
-  assert(iWarn > 0 && iRegion > iWarn && iCity > iRegion, '顺序应为 预警时间 → 地区 → 城市');
-  assert(iCity - iWarn < 1200, '三者应当相邻（同一行）');
-  assert(iUrl < iToken && iToken < iWarn, '地址与令牌应在前面且相邻');
-  assert(!/class="wide"/.test(html), '地址/令牌不该再独占整行');
-  assert(!/\.ntGrid \.wide\{/.test(html), 'wide 样式规则应已移除');
-  return '地址+令牌一行；预警时间+地区+城市一行';
+  const iTz = html.indexOf('id="ntTz"');
+  assert(iWarn > 0 && iTz > iWarn, '顺序应为 预警时间 → 时区');
+  assert(iTz - iWarn < 600, '两者应当相邻（同一行）');
+  return '预警时间 → 时区';
 });
 
-await check('时区用 IANA 现行规范标识符，且不含废弃别名', () => {
-  const src = html.slice(html.indexOf('const TZ_CURATED'), html.indexOf('const TZ_ALIAS'));
-  assert(/TZ_DEFAULT = 'Asia\/Shanghai'/.test(html), '默认时区应为 Asia/Shanghai');
-  assert(/Asia\/Kolkata/.test(src), '应使用现行规范名 Asia/Kolkata');
-  assert(/Europe\/Kyiv/.test(src), '应使用现行规范名 Europe/Kyiv');
-  assert(/Asia\/Kathmandu/.test(src), '应使用现行规范名 Asia/Kathmandu');
-  assert(/Asia\/Ho_Chi_Minh/.test(src), '应使用现行规范名 Asia/Ho_Chi_Minh');
-  const banned = ['Asia/Calcutta', 'Asia/Katmandu', 'Asia/Rangoon', 'Asia/Saigon', 'Europe/Kiev',
-    'America/Godthab', 'Atlantic/Faeroe', 'Africa/Asmera', 'Pacific/Ponape', 'Pacific/Truk'];
-  banned.forEach(b => assert(src.indexOf("'" + b + "'") < 0, '仍在使用废弃别名 ' + b));
-  // 全部标识符必须两段式或三段式的 Area/City 形态
-  const ids = [...src.matchAll(/'([A-Za-z]+\/[A-Za-z0-9_+\-]+)'/g)].map(m => m[1]);
-  assert(ids.length > 380, '标识符数量过少：' + ids.length);
-  assert(ids.every(id => /^[A-Za-z]+\/[A-Za-z0-9_+\-]+$/.test(id)), '存在形态不合法的标识符');
-  assert(ids.every(id => !/^(亚洲|欧洲|美洲|非洲|大洋洲|南极洲)\//.test(id)), '中文地区名污染了标识符');
-  return ids.length + ' 个标识符，全部为现行规范名';
+await check('列表覆盖 -12 到 +12 的全部整点，另含 +13 / +14，无重复', () => {
+  const src = html.slice(html.indexOf('const TZ_LIST'), html.indexOf('function normalizeUrl'));
+  const vals = [...src.matchAll(/^\s*\[(-?\d+),/gm)].map(m => Number(m[1]));
+  assert(vals.length >= 20, '选项过少：' + vals.length);
+  assert(new Set(vals).size === vals.length, '存在重复偏移：' + vals.join(','));
+  for (let i = -12; i <= 12; i++) assert(vals.includes(i), '缺少偏移 ' + i);
+  assert(vals.includes(13) && vals.includes(14), '缺少 UTC+13 / UTC+14');
+  assert(!vals.some(v => v % 1 !== 0), '不应出现非整点偏移：' + vals.filter(v => v % 1 !== 0));
+  assert(vals.indexOf(8) === 0, '首个选项应为 UTC+8，实际 ' + vals[0]);
+  return vals.length + ' 个整点偏移：' + vals[0] + ' … ' + vals[vals.length - 1];
 });
 
-await check('页面把 timeZone 标识符放进同步载荷', () => {
+await check('每项都带代表性城市名', () => {
+  const src = html.slice(html.indexOf('const TZ_LIST'), html.indexOf('function normalizeUrl'));
+  const labels = [...src.matchAll(/\[\s*-?\d+,\s*'(UTC[^']*)'\]/g)].map(m => m[1]);
+  assert(labels.length >= 20, '标签过少：' + labels.length);
+  labels.forEach(l => assert(/^UTC[+-]\d+\s+\S/.test(l), '标签缺少城市名：' + l));
+  assert(labels.some(l => /上海/.test(l)), 'UTC+8 应含上海');
+  return labels.slice(0, 3).join(' | ') + ' …';
+});
+
+await check('页面把 timeZone 偏移放进同步载荷', () => {
   const src = html.slice(html.indexOf('function buildPayload'), html.indexOf('function alertTypes'));
-  assert(/timeZone:\s*cfg\.zone/.test(src), 'buildPayload 未带上 cfg.zone');
-  return 'timeZone: cfg.zone';
+  assert(/timeZone:\s*cfg\.tz/.test(src), 'buildPayload 未带上 cfg.tz');
+  return 'timeZone: cfg.tz';
 });
 
-await check('页面本地推算额度重置文案时用 IANA 时区', () => {
+await check('页面本地推算额度重置文案用偏移，不写死钟点', () => {
   const src = html.slice(html.indexOf('function quotaResetHint'), html.indexOf('function readQuotaAt'));
-  assert(/cfg\.zone/.test(src), 'quotaResetHint 未使用 cfg.zone');
-  assert(/zoneOffset\(/.test(src), '未按 zoneOffset 计算偏移（夏令时会算错）');
-  // 偏移算法本体在 zoneOffset() 里，必须用 longOffset，否则夏令时拿不到 +2
-  const off = html.slice(html.indexOf('function zoneOffset'), html.indexOf('function quotaResetHint'));
-  assert(/timeZoneName:\s*'longOffset'/.test(off), 'zoneOffset 未用 longOffset');
-  const panel = html.slice(html.indexOf('id="ntUrl"'), html.indexOf('class="ntToggles"'));
-  assert(!/每天 8:00/.test(panel), '面板里仍写死 8:00');
-  return '按 cfg.zone + longOffset 推算';
-});
-
-await check('城市列表排除 Etc/* 这类易误用的时区', () => {
-  const src = html.slice(html.indexOf('function tzCatalogue'), html.indexOf('function buildTzIndex'));
-  assert(!/Etc\//.test(src.replace(/\/\*[\s\S]*?\*\//g, '')), '未过滤 Etc/*');
-  return '已过滤';
+  assert(/cfg\.tz/.test(src), 'quotaResetHint 未使用 cfg.tz');
+  assert(html.indexOf('每天 8:00 点重置') < 0, '页面里写死了 8:00');
+  return '按 cfg.tz 推算';
 });
 
 console.log('\n结果：' + (failed === 0 ? '全部通过' : failed + ' 项失败'));

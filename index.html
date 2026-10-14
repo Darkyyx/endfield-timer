@@ -620,14 +620,9 @@
           <span class="tip">即将爆仓或耗尽时提醒</span>
         </label>
         <label>
-          <span class="k">地区</span>
-          <select class="inp sel" id="ntTzRegion"></select>
+          <span class="k">时区</span>
+          <select class="inp sel" id="ntTz"></select>
           <span class="tip">通知里预计时间所用的时区</span>
-        </label>
-        <label>
-          <span class="k">城市</span>
-          <select class="inp sel" id="ntTzCity"></select>
-          <span class="tip">&nbsp;</span>
         </label>
       </div>
 
@@ -661,7 +656,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.14.0</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.15.0</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -675,7 +670,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.14.0';
+  const PAGE_VERSION = '1.15.0';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1231,8 +1226,7 @@
     const urlEl = $('ntUrl');
     const tokenEl = $('ntToken');
     const warnEl = $('ntWarn');
-    const regionEl = $('ntTzRegion');
-    const cityEl = $('ntTzCity');
+    const tzEl = $('ntTz');
     const onEl = $('ntOn');
     const fullEl = $('ntWarnFull');
     const emptyEl = $('ntWarnEmpty');
@@ -1255,230 +1249,39 @@
     let readOnly = false;     // 用户选了"不导入"，本页面保持只读
     let claiming = false;
 
-    /* ---------- 时区：两级下拉（地区 → 城市），值是 IANA 标识符 ---------- */
-    const TZ_DEFAULT = 'Asia/Shanghai';
-    /* 地区 → 城市。第二项是完整 IANA 规范标识符（不用 Calcutta/Kiev 等废弃别名）。
-       常用城市已译成中文，其余保留 IANA 城市名（下划线转空格）。
-       共 7 个地区 417 个城市，取自 Intl.supportedValuesOf('timeZone')。 */
-    const TZ_CURATED = {
-      亚洲: [
-        ['阿克套', 'Asia/Aqtau'], ['阿克托别', 'Asia/Aqtobe'], ['阿拉木图', 'Asia/Almaty'],
-        ['阿纳德尔', 'Asia/Anadyr'], ['阿什哈巴德', 'Asia/Ashgabat'], ['阿特劳', 'Asia/Atyrau'],
-        ['埃里温', 'Asia/Yerevan'], ['安曼', 'Asia/Amman'], ['澳门', 'Asia/Macau'],
-        ['巴尔纳乌尔', 'Asia/Barnaul'], ['巴格达', 'Asia/Baghdad'], ['巴库', 'Asia/Baku'],
-        ['贝鲁特', 'Asia/Beirut'], ['比什凯克', 'Asia/Bishkek'], ['查亚普拉', 'Asia/Jayapura'],
-        ['赤塔', 'Asia/Chita'], ['达卡', 'Asia/Dhaka'], ['大马士革', 'Asia/Damascus'],
-        ['德黑兰', 'Asia/Tehran'], ['迪拜', 'Asia/Dubai'], ['帝力', 'Asia/Dili'],
-        ['第比利斯', 'Asia/Tbilisi'], ['东京', 'Asia/Tokyo'], ['杜尚别', 'Asia/Dushanbe'],
-        ['多哈', 'Asia/Qatar'], ['鄂木斯克', 'Asia/Omsk'], ['法马古斯塔', 'Asia/Famagusta'],
-        ['符拉迪沃斯托克', 'Asia/Vladivostok'], ['古晋', 'Asia/Kuching'], ['汉德加', 'Asia/Khandyga'],
-        ['胡志明市', 'Asia/Ho_Chi_Minh'], ['吉隆坡', 'Asia/Kuala_Lumpur'], ['加德满都', 'Asia/Kathmandu'],
-        ['加尔各答', 'Asia/Kolkata'], ['加沙', 'Asia/Gaza'], ['金边', 'Asia/Phnom_Penh'],
-        ['喀布尔', 'Asia/Kabul'], ['卡拉奇', 'Asia/Karachi'], ['堪察加', 'Asia/Kamchatka'],
-        ['科布多', 'Asia/Hovd'], ['科伦坡', 'Asia/Colombo'], ['科斯塔奈', 'Asia/Qostanay'],
-        ['科威特城', 'Asia/Kuwait'], ['克拉斯诺亚尔斯克', 'Asia/Krasnoyarsk'], ['克孜勒奥尔达', 'Asia/Qyzylorda'],
-        ['坤甸', 'Asia/Pontianak'], ['利雅得', 'Asia/Riyadh'], ['马加丹', 'Asia/Magadan'],
-        ['马尼拉', 'Asia/Manila'], ['马斯喀特', 'Asia/Muscat'], ['麦纳麦', 'Asia/Bahrain'],
-        ['曼谷', 'Asia/Bangkok'], ['尼科西亚', 'Asia/Nicosia'], ['平壤', 'Asia/Pyongyang'],
-        ['撒马尔罕', 'Asia/Samarkand'], ['萨哈林', 'Asia/Sakhalin'], ['上海', 'Asia/Shanghai'],
-        ['首尔', 'Asia/Seoul'], ['斯里巴加湾', 'Asia/Brunei'], ['塔什干', 'Asia/Tashkent'],
-        ['台北', 'Asia/Taipei'], ['廷布', 'Asia/Thimphu'], ['托木斯克', 'Asia/Tomsk'],
-        ['万象', 'Asia/Vientiane'], ['望加锡', 'Asia/Makassar'], ['乌拉尔', 'Asia/Oral'],
-        ['乌兰巴托', 'Asia/Ulaanbaatar'], ['乌鲁木齐', 'Asia/Urumqi'], ['乌斯季涅拉', 'Asia/Ust-Nera'],
-        ['希伯伦', 'Asia/Hebron'], ['香港', 'Asia/Hong_Kong'], ['新加坡', 'Asia/Singapore'],
-        ['新库兹涅茨克', 'Asia/Novokuznetsk'], ['新西伯利亚', 'Asia/Novosibirsk'], ['雅加达', 'Asia/Jakarta'],
-        ['雅库茨克', 'Asia/Yakutsk'], ['亚丁', 'Asia/Aden'], ['仰光', 'Asia/Yangon'],
-        ['耶路撒冷', 'Asia/Jerusalem'], ['叶卡捷琳堡', 'Asia/Yekaterinburg'], ['伊尔库茨克', 'Asia/Irkutsk'],
-        ['中科雷姆斯克', 'Asia/Srednekolymsk']
-      ],
-      欧洲: [
-        ['阿姆斯特丹', 'Europe/Amsterdam'], ['阿斯特拉罕', 'Europe/Astrakhan'], ['安道尔', 'Europe/Andorra'],
-        ['奥斯陆', 'Europe/Oslo'], ['巴黎', 'Europe/Paris'], ['百慕大', 'Atlantic/Bermuda'],
-        ['柏林', 'Europe/Berlin'], ['贝尔格莱德', 'Europe/Belgrade'], ['比辛根', 'Europe/Busingen'],
-        ['波德戈里察', 'Europe/Podgorica'], ['布达佩斯', 'Europe/Budapest'], ['布加勒斯特', 'Europe/Bucharest'],
-        ['布拉迪斯拉发', 'Europe/Bratislava'], ['布拉格', 'Europe/Prague'], ['布鲁塞尔', 'Europe/Brussels'],
-        ['地拉那', 'Europe/Tirane'], ['都柏林', 'Europe/Dublin'], ['法罗群岛', 'Atlantic/Faroe'],
-        ['梵蒂冈', 'Europe/Vatican'], ['伏尔加格勒', 'Europe/Volgograd'], ['哥本哈根', 'Europe/Copenhagen'],
-        ['根西', 'Europe/Guernsey'], ['赫尔辛基', 'Europe/Helsinki'], ['华沙', 'Europe/Warsaw'],
-        ['基辅', 'Europe/Kyiv'], ['基洛夫', 'Europe/Kirov'], ['基希讷乌', 'Europe/Chisinau'],
-        ['加里宁格勒', 'Europe/Kaliningrad'], ['加那利群岛', 'Atlantic/Canary'], ['朗伊尔城', 'Arctic/Longyearbyen'],
-        ['雷克雅未克', 'Atlantic/Reykjavik'], ['里加', 'Europe/Riga'], ['里斯本', 'Europe/Lisbon'],
-        ['卢布尔雅那', 'Europe/Ljubljana'], ['卢森堡', 'Europe/Luxembourg'], ['伦敦', 'Europe/London'],
-        ['罗马', 'Europe/Rome'], ['马德拉', 'Atlantic/Madeira'], ['马德里', 'Europe/Madrid'],
-        ['马恩岛', 'Europe/Isle_of_Man'], ['马耳他', 'Europe/Malta'], ['玛丽港', 'Europe/Mariehamn'],
-        ['明斯克', 'Europe/Minsk'], ['摩纳哥', 'Europe/Monaco'], ['莫斯科', 'Europe/Moscow'],
-        ['南乔治亚', 'Atlantic/South_Georgia'], ['萨格勒布', 'Europe/Zagreb'], ['萨拉热窝', 'Europe/Sarajevo'],
-        ['萨拉托夫', 'Europe/Saratov'], ['萨马拉', 'Europe/Samara'], ['圣赫勒拿', 'Atlantic/St_Helena'],
-        ['圣马力诺', 'Europe/San_Marino'], ['斯德哥尔摩', 'Europe/Stockholm'], ['斯科普里', 'Europe/Skopje'],
-        ['斯坦利', 'Atlantic/Stanley'], ['苏黎世', 'Europe/Zurich'], ['索非亚', 'Europe/Sofia'],
-        ['塔林', 'Europe/Tallinn'], ['瓦杜兹', 'Europe/Vaduz'], ['维尔纽斯', 'Europe/Vilnius'],
-        ['维也纳', 'Europe/Vienna'], ['乌里扬诺夫斯克', 'Europe/Ulyanovsk'], ['辛菲罗波尔', 'Europe/Simferopol'],
-        ['雅典', 'Europe/Athens'], ['亚速尔群岛', 'Atlantic/Azores'], ['泽西', 'Europe/Jersey'],
-        ['直布罗陀', 'Europe/Gibraltar'], ['Cape Verde', 'Atlantic/Cape_Verde'], ['Istanbul', 'Europe/Istanbul']
-      ],
-      美洲: [
-        ['阿拉瓜伊纳', 'America/Araguaina'], ['阿鲁巴', 'America/Aruba'], ['埃达克', 'America/Adak'],
-        ['埃德蒙顿', 'America/Edmonton'], ['埃鲁内佩', 'America/Eirunepe'], ['埃莫西约', 'America/Hermosillo'],
-        ['安圭拉', 'America/Anguilla'], ['安克雷奇', 'America/Anchorage'], ['安提瓜', 'America/Antigua'],
-        ['奥希纳加', 'America/Ojinaga'], ['巴巴多斯', 'America/Barbados'], ['巴拿马城', 'America/Panama'],
-        ['巴伊亚', 'America/Bahia'], ['巴伊亚班德拉斯', 'America/Bahia_Banderas'], ['贝伦', 'America/Belem'],
-        ['波多黎各', 'America/Puerto_Rico'], ['波多韦柳', 'America/Porto_Velho'], ['波哥大', 'America/Bogota'],
-        ['伯利兹', 'America/Belize'], ['博阿维斯塔', 'America/Boa_Vista'], ['博伊西', 'America/Boise'],
-        ['布朗萨布隆', 'America/Blanc-Sablon'], ['大坎普', 'America/Campo_Grande'], ['大特克', 'America/Grand_Turk'],
-        ['丹佛', 'America/Denver'], ['丹麦港', 'America/Danmarkshavn'], ['道森克里克', 'America/Dawson_Creek'],
-        ['底特律', 'America/Detroit'], ['蒂华纳', 'America/Tijuana'], ['多伦多', 'America/Toronto'],
-        ['多米尼克', 'America/Dominica'], ['菲尼克斯', 'America/Phoenix'], ['费尔南多迪诺罗尼亚', 'America/Noronha'],
-        ['福塔莱萨', 'America/Fortaleza'], ['哥斯达黎加', 'America/Costa_Rica'], ['格莱斯贝', 'America/Glace_Bay'],
-        ['格林纳达', 'America/Grenada'], ['古斯贝', 'America/Goose_Bay'], ['瓜德罗普', 'America/Guadeloupe'],
-        ['瓜亚基尔', 'America/Guayaquil'], ['哈利法克斯', 'America/Halifax'], ['哈瓦那', 'America/Havana'],
-        ['胡胡伊', 'America/Jujuy'], ['华雷斯城', 'America/Ciudad_Juarez'], ['怀特霍斯', 'America/Whitehorse'],
-        ['加拉加斯', 'America/Caracas'], ['卡塔马卡', 'America/Catamarca'], ['卡宴', 'America/Cayenne'],
-        ['开曼', 'America/Cayman'], ['坎昆', 'America/Cancun'], ['科尔多瓦', 'America/Cordoba'],
-        ['科伊艾克', 'America/Coyhaique'], ['克拉伦代克', 'America/Kralendijk'], ['克雷斯顿', 'America/Creston'],
-        ['库拉索', 'America/Curacao'], ['库亚巴', 'America/Cuiaba'], ['拉巴斯', 'America/La_Paz'],
-        ['兰金因莱特', 'America/Rankin_Inlet'], ['雷索卢特', 'America/Resolute'], ['累西腓', 'America/Recife'],
-        ['里奥布兰科', 'America/Rio_Branco'], ['里奥加耶戈斯', 'America/Argentina/Rio_Gallegos'], ['里贾纳', 'America/Regina'],
-        ['利马', 'America/Lima'], ['路易斯维尔', 'America/Louisville'], ['洛杉矶', 'America/Los_Angeles'],
-        ['马里戈特', 'America/Marigot'], ['马那瓜', 'America/Managua'], ['马瑙斯', 'America/Manaus'],
-        ['马萨特兰', 'America/Mazatlan'], ['马塞约', 'America/Maceio'], ['马塔莫罗斯', 'America/Matamoros'],
-        ['马提尼克', 'America/Martinique'], ['梅里达', 'America/Merida'], ['梅诺米尼', 'America/Menominee'],
-        ['梅特拉卡特拉', 'America/Metlakatla'], ['门多萨', 'America/Mendoza'], ['蒙得维的亚', 'America/Montevideo'],
-        ['蒙克顿', 'America/Moncton'], ['蒙特雷', 'America/Monterrey'], ['蒙特塞拉特', 'America/Montserrat'],
-        ['密克隆', 'America/Miquelon'], ['墨西哥城', 'America/Mexico_City'], ['拿骚', 'America/Nassau'],
-        ['纳尔逊堡', 'America/Fort_Nelson'], ['纽约', 'America/New_York'], ['努克', 'America/Nuuk'],
-        ['诺姆', 'America/Nome'], ['帕拉马里博', 'America/Paramaribo'], ['蓬塔阿雷纳斯', 'America/Punta_Arenas'],
-        ['奇瓦瓦', 'America/Chihuahua'], ['乔治敦', 'America/Guyana'], ['萨尔塔', 'America/Argentina/Salta'],
-        ['圣巴泰勒米', 'America/St_Barthelemy'], ['圣保罗', 'America/Sao_Paulo'], ['圣地亚哥', 'America/Santiago'],
-        ['圣多明各', 'America/Santo_Domingo'], ['圣基茨', 'America/St_Kitts'], ['圣卢西亚', 'America/St_Lucia'],
-        ['圣萨尔瓦多', 'America/El_Salvador'], ['圣塔伦', 'America/Santarem'], ['圣托马斯', 'America/St_Thomas'],
-        ['圣文森特', 'America/St_Vincent'], ['圣约翰斯', 'America/St_Johns'], ['斯科斯比松', 'America/Scoresbysund'],
-        ['斯威夫特卡伦特', 'America/Swift_Current'], ['太子港', 'America/Port-au-Prince'], ['特古西加尔巴', 'America/Tegucigalpa'],
-        ['图库曼', 'America/Argentina/Tucuman'], ['图勒', 'America/Thule'], ['托尔托拉', 'America/Tortola'],
-        ['危地马拉城', 'America/Guatemala'], ['温哥华', 'America/Vancouver'], ['温尼伯', 'America/Winnipeg'],
-        ['乌斯怀亚', 'America/Argentina/Ushuaia'], ['西班牙港', 'America/Port_of_Spain'], ['锡特卡', 'America/Sitka'],
-        ['下王子区', 'America/Lower_Princes'], ['牙买加', 'America/Jamaica'], ['亚库塔特', 'America/Yakutat'],
-        ['亚松森', 'America/Asuncion'], ['伊魁特', 'America/Iqaluit'], ['伊努维克', 'America/Inuvik'],
-        ['印第安纳波利斯', 'America/Indianapolis'], ['芝加哥', 'America/Chicago'], ['朱诺', 'America/Juneau'],
-        ['Beulah', 'America/North_Dakota/Beulah'], ['Cambridge Bay', 'America/Cambridge_Bay'], ['Center', 'America/North_Dakota/Center'],
-        ['Dawson', 'America/Dawson'], ['Knox', 'America/Indiana/Knox'], ['La Rioja', 'America/Argentina/La_Rioja'],
-        ['Marengo', 'America/Indiana/Marengo'], ['Monticello', 'America/Kentucky/Monticello'], ['New Salem', 'America/North_Dakota/New_Salem'],
-        ['Petersburg', 'America/Indiana/Petersburg'], ['San Juan', 'America/Argentina/San_Juan'], ['San Luis', 'America/Argentina/San_Luis'],
-        ['Tell City', 'America/Indiana/Tell_City'], ['Vevay', 'America/Indiana/Vevay'], ['Vincennes', 'America/Indiana/Vincennes'],
-        ['Winamac', 'America/Indiana/Winamac']
-      ],
-      大洋洲: [
-        ['阿德莱德', 'Australia/Adelaide'], ['阿皮亚', 'Pacific/Apia'], ['埃法特', 'Pacific/Efate'],
-        ['奥克兰', 'Pacific/Auckland'], ['波纳佩', 'Pacific/Pohnpei'], ['布干维尔', 'Pacific/Bougainville'],
-        ['布里斯班', 'Australia/Brisbane'], ['布罗肯希尔', 'Australia/Broken_Hill'], ['查塔姆群岛', 'Pacific/Chatham'],
-        ['楚克', 'Pacific/Chuuk'], ['达尔文', 'Australia/Darwin'], ['法考福', 'Pacific/Fakaofo'],
-        ['斐济', 'Pacific/Fiji'], ['富纳富提', 'Pacific/Funafuti'], ['甘比尔', 'Pacific/Gambier'],
-        ['瓜达尔卡纳尔', 'Pacific/Guadalcanal'], ['关岛', 'Pacific/Guam'], ['豪勋爵岛', 'Australia/Lord_Howe'],
-        ['霍巴特', 'Australia/Hobart'], ['基里蒂马蒂', 'Pacific/Kiritimati'], ['科斯雷', 'Pacific/Kosrae'],
-        ['夸贾林', 'Pacific/Kwajalein'], ['拉罗汤加', 'Pacific/Rarotonga'], ['林德曼', 'Australia/Lindeman'],
-        ['马克萨斯', 'Pacific/Marquesas'], ['马朱罗', 'Pacific/Majuro'], ['莫尔兹比港', 'Pacific/Port_Moresby'],
-        ['墨尔本', 'Australia/Melbourne'], ['瑙鲁', 'Pacific/Nauru'], ['纽埃', 'Pacific/Niue'],
-        ['努美阿', 'Pacific/Noumea'], ['诺福克', 'Pacific/Norfolk'], ['帕果帕果', 'Pacific/Pago_Pago'],
-        ['帕劳', 'Pacific/Palau'], ['皮特凯恩', 'Pacific/Pitcairn'], ['珀斯', 'Australia/Perth'],
-        ['塞班', 'Pacific/Saipan'], ['塔拉瓦', 'Pacific/Tarawa'], ['塔希提', 'Pacific/Tahiti'],
-        ['汤加塔布', 'Pacific/Tongatapu'], ['瓦利斯', 'Pacific/Wallis'], ['威克岛', 'Pacific/Wake'],
-        ['悉尼', 'Australia/Sydney'], ['尤克拉', 'Australia/Eucla'], ['中途岛', 'Pacific/Midway'],
-        ['Easter', 'Pacific/Easter'], ['Galapagos', 'Pacific/Galapagos'], ['Honolulu', 'Pacific/Honolulu'],
-        ['Kanton', 'Pacific/Kanton']
-      ],
-      非洲: [
-        ['阿比让', 'Africa/Abidjan'], ['阿尔及尔', 'Africa/Algiers'], ['阿克拉', 'Africa/Accra'],
-        ['阿斯马拉', 'Africa/Asmara'], ['阿尤恩', 'Africa/El_Aaiun'], ['巴马科', 'Africa/Bamako'],
-        ['班吉', 'Africa/Bangui'], ['班珠尔', 'Africa/Banjul'], ['比绍', 'Africa/Bissau'],
-        ['波多诺伏', 'Africa/Porto-Novo'], ['布拉柴维尔', 'Africa/Brazzaville'], ['布兰太尔', 'Africa/Blantyre'],
-        ['布琼布拉', 'Africa/Bujumbura'], ['查戈斯', 'Indian/Chagos'], ['达喀尔', 'Africa/Dakar'],
-        ['达累斯萨拉姆', 'Africa/Dar_es_Salaam'], ['的黎波里', 'Africa/Tripoli'], ['杜阿拉', 'Africa/Douala'],
-        ['恩贾梅纳', 'Africa/Ndjamena'], ['弗里敦', 'Africa/Freetown'], ['哈博罗内', 'Africa/Gaborone'],
-        ['哈拉雷', 'Africa/Harare'], ['基加利', 'Africa/Kigali'], ['吉布提', 'Africa/Djibouti'],
-        ['金沙萨', 'Africa/Kinshasa'], ['喀土穆', 'Africa/Khartoum'], ['卡萨布兰卡', 'Africa/Casablanca'],
-        ['开罗', 'Africa/Cairo'], ['凯尔盖朗', 'Indian/Kerguelen'], ['坎帕拉', 'Africa/Kampala'],
-        ['科科斯', 'Indian/Cocos'], ['科摩罗', 'Indian/Comoro'], ['科纳克里', 'Africa/Conakry'],
-        ['拉各斯', 'Africa/Lagos'], ['利伯维尔', 'Africa/Libreville'], ['留尼汪', 'Indian/Reunion'],
-        ['卢本巴希', 'Africa/Lubumbashi'], ['卢萨卡', 'Africa/Lusaka'], ['罗安达', 'Africa/Luanda'],
-        ['洛美', 'Africa/Lome'], ['马埃', 'Indian/Mahe'], ['马尔代夫', 'Indian/Maldives'],
-        ['马拉博', 'Africa/Malabo'], ['马普托', 'Africa/Maputo'], ['马塞卢', 'Africa/Maseru'],
-        ['马约特', 'Indian/Mayotte'], ['毛里求斯', 'Indian/Mauritius'], ['蒙罗维亚', 'Africa/Monrovia'],
-        ['摩加迪沙', 'Africa/Mogadishu'], ['姆巴巴内', 'Africa/Mbabane'], ['内罗毕', 'Africa/Nairobi'],
-        ['尼亚美', 'Africa/Niamey'], ['努瓦克肖特', 'Africa/Nouakchott'], ['圣诞岛', 'Indian/Christmas'],
-        ['圣多美', 'Africa/Sao_Tome'], ['塔那那利佛', 'Indian/Antananarivo'], ['突尼斯', 'Africa/Tunis'],
-        ['瓦加杜古', 'Africa/Ouagadougou'], ['温得和克', 'Africa/Windhoek'], ['休达', 'Africa/Ceuta'],
-        ['亚的斯亚贝巴', 'Africa/Addis_Ababa'], ['约翰内斯堡', 'Africa/Johannesburg'], ['朱巴', 'Africa/Juba']
-      ],
-      UTC: [
-        ['协调世界时', 'UTC']
-      ],
-      南极洲: [
-        ['戴维斯', 'Antarctica/Davis'], ['迪蒙迪维尔', 'Antarctica/DumontDUrville'], ['东方站', 'Antarctica/Vostok'],
-        ['凯西', 'Antarctica/Casey'], ['罗瑟拉', 'Antarctica/Rothera'], ['麦克默多', 'Antarctica/McMurdo'],
-        ['麦夸里', 'Antarctica/Macquarie'], ['莫森', 'Antarctica/Mawson'], ['帕尔默', 'Antarctica/Palmer'],
-        ['特罗尔', 'Antarctica/Troll'], ['昭和', 'Antarctica/Syowa']
-      ],
-    };
-
-    /* 个别浏览器 ICU 版本较旧，只认已废弃的别名。用现行规范名当主值，
-       解析不到时退回旧名，保证列表里的每一项都能真正生效。 */
-    const TZ_ALIAS = {
-      'Asia/Kolkata': ['Asia/Calcutta'],
-      'Asia/Kathmandu': ['Asia/Katmandu'],
-      'Asia/Yangon': ['Asia/Rangoon'],
-      'Asia/Ho_Chi_Minh': ['Asia/Saigon'],
-      'Asia/Macau': ['Asia/Macao'],
-      'Asia/Ulaanbaatar': ['Asia/Ulan_Bator'],
-      'Europe/Kyiv': ['Europe/Kiev'],
-      'Atlantic/Faroe': ['Atlantic/Faeroe'],
-      'Africa/Asmara': ['Africa/Asmera'],
-      'Pacific/Pohnpei': ['Pacific/Ponape'],
-      'Pacific/Chuuk': ['Pacific/Truk'],
-      'Pacific/Kanton': ['Pacific/Enderbury'],
-      'America/Nuuk': ['America/Godthab']
-    };
-    let tzIndex = null;    // { 'Asia/Shanghai': { region, city, label } }
-
-    function tzUsable(id) {
-      try { new Intl.DateTimeFormat('en-US', { timeZone: id }).format(new Date()); return true; }
-      catch (e) { return false; }
-    }
-    function tzPick(id) {
-      if (tzUsable(id)) return id;
-      const alts = TZ_ALIAS[id] || [];
-      for (let i = 0; i < alts.length; i++) if (tzUsable(alts[i])) return alts[i];
-      return '';
-    }
-
-    /* 列表已覆盖 IANA 全部地区（406 个城市），这里只做一次可用性过滤：
-       个别浏览器的 ICU 版本较旧，可能不认某个现行规范名，那就退回它能认的别名。 */
-    function tzCatalogue() {
-      const out = {};
-      Object.keys(TZ_CURATED).forEach(function (region) {
-        out[region] = [];
-        TZ_CURATED[region].forEach(function (pair) {
-          const usable = tzPick(pair[1]);
-          if (usable) out[region].push({ label: pair[0], id: usable });
-        });
-      });
-      return out;
-    }
-
-    function buildTzIndex() {
-      const cat = tzCatalogue();
-      const idx = {};
-      Object.keys(cat).forEach(function (region) {
-        cat[region].forEach(function (c) { idx[c.id] = { region: region, label: c.label }; });
-      });
-      return { cat: cat, idx: idx };
-    }
-
-    function tzRegionOf(id) {
-      if (!tzIndex) return 'Asia';
-      const hit = tzIndex.idx[id];
-      if (hit) return hit.region;
-      return tzIndex.cat[id.split('/')[0]] ? id.split('/')[0] : 'Asia';
-    }
-
+    /* ---------- 时区：固定 UTC 偏移 ---------- */
+    /* 本项目不追求跨夏令时的绝对准确，用固定偏移最简单可预测，
+       也不会因为浏览器 ICU 版本差异导致列表里缺城市。 */
+    const TZ_DEFAULT = 8;
+    const TZ_LIST = [
+      [8, 'UTC+8　上海 / 北京'],
+      [9, 'UTC+9　东京 / 首尔'],
+      [10, 'UTC+10　悉尼 / 关岛'],
+      [11, 'UTC+11　所罗门群岛'],
+      [12, 'UTC+12　奥克兰 / 斐济'],
+      [13, 'UTC+13　汤加 / 萨摩亚'],
+      [14, 'UTC+14　基里蒂马蒂'],
+      [7, 'UTC+7　曼谷 / 雅加达'],
+      [6, 'UTC+6　达卡 / 阿拉木图'],
+      [5, 'UTC+5　卡拉奇 / 塔什干'],
+      [4, 'UTC+4　迪拜'],
+      [3, 'UTC+3　莫斯科 / 利雅得'],
+      [2, 'UTC+2　开罗 / 雅典'],
+      [1, 'UTC+1　柏林 / 巴黎'],
+      [0, 'UTC+0　伦敦'],
+      [-1, 'UTC-1　亚速尔群岛'],
+      [-2, 'UTC-2　费尔南多'],
+      [-3, 'UTC-3　圣保罗'],
+      [-4, 'UTC-4　圣地亚哥'],
+      [-5, 'UTC-5　纽约'],
+      [-6, 'UTC-6　芝加哥'],
+      [-7, 'UTC-7　丹佛'],
+      [-8, 'UTC-8　洛杉矶'],
+      [-9, 'UTC-9　安克雷奇'],
+      [-10, 'UTC-10　檀香山'],
+      [-11, 'UTC-11　帕果帕果'],
+      [-12, 'UTC-12　贝克岛']
+    ];
     /**
      * 补全协议。用户常常只填 "xxx.workers.dev" 而漏掉 https://，
      * 那样浏览器会把它当成相对路径拼到当前页面后面
@@ -1504,9 +1307,9 @@
         on: !!c.on,
         warnFull: typeof c.warnFull === 'boolean' ? c.warnFull : true,
         warnEmpty: typeof c.warnEmpty === 'boolean' ? c.warnEmpty : legacyEmpty,
-        // 通知里预计时间所用的时区（IANA 标识符，如 Asia/Shanghai）。默认上海。
-        zone: typeof c.zone === 'string' && /^[A-Za-z]+\/[A-Za-z0-9_+\-]+$/.test(c.zone)
-          ? c.zone : (c.zone === 'UTC' ? 'UTC' : TZ_DEFAULT)
+        // 通知里预计时间所用的时区（小时偏移）。默认 +8（北京时间）。
+        tz: Number.isFinite(Number(c.tz)) && Number(c.tz) >= -12 && Number(c.tz) <= 14
+          ? Math.round(Number(c.tz) * 2) / 2 : TZ_DEFAULT
       };
     }
 
@@ -1539,43 +1342,15 @@
        不能因为"这次请求本身成功"就显示绿灯。 */
     /**
      * 额度重置时刻文案。Cloudflare 按 **UTC 零点** 重置额度，本地钟点取决于所选时区：
-     * Asia/Shanghai → 8:00，Asia/Tokyo → 9:00，America/New_York → 前一天 20:00。
+     * UTC+8 → 8:00，UTC+9 → 9:00，UTC-5 → 前一天 19:00。
      * /sync 响应里带 quotaReset 时优先用它（Worker 是权威，避免两边算法漂移）。
      */
     let serverQuotaReset = '';
 
-    /** 某个时刻在指定时区的 UTC 偏移（小时，含夏令时）——与 Worker 的 zoneOffsetHours 同算法 */
-    function zoneOffset(ms, zone) {
-      try {
-        const parts = new Intl.DateTimeFormat('en-US', {
-          timeZone: zone, timeZoneName: 'longOffset'
-        }).formatToParts(new Date(ms));
-        const name = (parts.find(function (p) { return p.type === 'timeZoneName'; }) || {}).value || '';
-        const m = name.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
-        if (m) {
-          const v = Number(m[2]) + (m[3] ? Number(m[3]) / 60 : 0);
-          return m[1] === '-' ? -v : v;
-        }
-        if (/GMT/.test(name)) return 0;
-      } catch (e) { /* 落到下面的日历算法 */ }
-      try {
-        const p = new Intl.DateTimeFormat('en-US', {
-          timeZone: zone, hour: '2-digit', minute: '2-digit', hour12: false
-        }).formatToParts(new Date(ms));
-        const g = function (t) { return Number((p.find(function (x) { return x.type === t; }) || {}).value); };
-        const h = g('hour') % 24;
-        return Math.round((h * 60 + g('minute') - (new Date(ms).getUTCHours() * 60 + new Date(ms).getUTCMinutes())) / 60 * 2) / 2;
-      } catch (e) {
-        return 8;
-      }
-    }
-
     function quotaResetHint() {
       if (serverQuotaReset) return serverQuotaReset;
-      // 下一个 UTC 零点就是重置时刻，用它的偏移算本地钟点
-      const now = Date.now();
-      const at = (Math.floor(now / 86400000) + 1) * 86400000;
-      const o = zoneOffset(at, cfg.zone);
+      // Cloudflare 按 UTC 零点重置，换成所选偏移的本地钟点
+      const o = cfg.tz;
       const h = ((24 + o) % 24 + 24) % 24;
       const hh = Math.floor(h);
       const mm = Math.round((h - hh) * 60);
@@ -1674,7 +1449,7 @@
         quotaAt: quotaAt || 0,      // 回显给 Worker：额度用尽时它自己写不进 KV，只能靠页面记着
         warnMinutes: cfg.warn,
         alertTypes: alertTypes(),
-        timeZone: cfg.zone,
+        timeZone: cfg.tz,
         rows: list
       };
       return JSON.stringify(extra ? Object.assign(body, extra) : body);
@@ -1717,7 +1492,7 @@
         return;
       }
 
-      // Worker 是重置时刻文案的权威（它知道 KV 的真实时区配置）；拿不到就本地按 cfg.zone 推算
+      // Worker 是重置时刻文案的权威（它知道 KV 的真实时区配置）；拿不到就本地按 cfg.tz 推算
       serverQuotaReset = typeof data.quotaReset === 'string' ? data.quotaReset : '';
 
       // KV 额度：只在"确实没写成功"或"本次探测确认仍不足"时才置位；
@@ -1949,7 +1724,8 @@
       cfg.on = !!onEl.checked;
       cfg.warnFull = !!fullEl.checked;
       cfg.warnEmpty = !!emptyEl.checked;
-      if (cityEl.value) cfg.zone = cityEl.value;      // 两级下拉的最终值就是 IANA 标识符
+      const tz = Number(tzEl.value);
+      cfg.tz = (Number.isFinite(tz) && tz >= -12 && tz <= 14) ? tz : TZ_DEFAULT;
       // 时区变了，本地推算的额度重置文案要作废，改用新时区重算
       serverQuotaReset = '';
       // 把补全后的地址回填到输入框，让用户看到实际会请求到哪里
@@ -1979,28 +1755,12 @@
       });
     });
 
-    // 地区变了 → 重填城市列表（保留本地区内的选择，否则取第一个）
-    regionEl.addEventListener('change', function () {
-      fillCities(regionEl.value, '');
-      refreshCfg();
-      if (!cfg.on) { setStatus('off', '未开启 · 数据只保存在本机'); return; }
-      if (!ready()) { setStatus('err', '未填写 Worker 地址或同步令牌'); return; }
-      scheduleSync(200);
-    });
-
-    cityEl.addEventListener('change', function () {
-      refreshCfg();
-      if (!cfg.on) { clearTimeout(syncTimer); setStatus('off', '未开启 · 数据只保存在本机'); return; }
-      if (!ready()) { setStatus('err', '未填写 Worker 地址或同步令牌'); return; }
-      scheduleSync(200);   // 时区变了，把设置同步给 Worker
-    });
-
-    [onEl, fullEl, emptyEl].forEach(function (el) {
+    [onEl, fullEl, emptyEl, tzEl].forEach(function (el) {
       el.addEventListener('change', function () {
         refreshCfg();
         if (!cfg.on) { clearTimeout(syncTimer); setStatus('off', '未开启 · 数据只保存在本机'); return; }
         if (!ready()) { setStatus('err', '未填写 Worker 地址或同步令牌'); return; }
-        scheduleSync(200);   // 提醒方向变了，把设置同步给 Worker
+        scheduleSync(200);   // 提醒方向或时区变了，把设置同步给 Worker
       });
     });
 
@@ -2048,38 +1808,18 @@
         .catch(function (e) { setStatus('err', '无法连接 Worker：' + (e && e.message ? e.message : e)); });
     });
 
-    /* ---- 时区两级下拉 ---- */
-    tzIndex = buildTzIndex();
-    const tzRegions = Object.keys(tzIndex.cat);
-
-    function fillCities(region, want) {
-      const list = tzIndex.cat[region] || [];
-      cityEl.innerHTML = list.map(function (c) {
-        return '<option value="' + c.id + '">' + c.label + '</option>';
-      }).join('');
-      // 目标城市在本地区则选中它，否则退回第一个
-      const has = list.some(function (c) { return c.id === want; });
-      cityEl.value = has ? want : (list[0] ? list[0].id : '');
-    }
-
-    function fillRegions(want) {
-      regionEl.innerHTML = tzRegions.map(function (r) {
-        return '<option value="' + r + '">' + r + '</option>';
-      }).join('');
-      const region = tzRegionOf(want);
-      regionEl.value = tzIndex.cat[region] ? region : (tzRegions[0] || '');
-      fillCities(regionEl.value, want);
-    }
-
-    // 启动前先兜底建一次，保证 cfg.zone 一定是列表里能选中的值
-    cfg.zone = tzIndex.idx[cfg.zone] ? cfg.zone
-      : (cfg.zone === 'UTC' && tzIndex.idx.UTC ? 'UTC' : (tzIndex.idx[TZ_DEFAULT] ? TZ_DEFAULT : cfg.zone));
+    /* ---- 时区下拉（固定偏移） ---- */
+    tzEl.innerHTML = TZ_LIST.map(function (pair) {
+      return '<option value="' + pair[0] + '">' + pair[1] + '</option>';
+    }).join('');
+    // 存储值可能不在列表里（旧配置或手改过），兜底到默认偏移
+    if (!TZ_LIST.some(function (p) { return p[0] === cfg.tz; })) cfg.tz = TZ_DEFAULT;
 
     /* ---- 启动 ---- */
     urlEl.value = cfg.url;
     tokenEl.value = cfg.token;
     warnEl.value = String(cfg.warn);
-    fillRegions(cfg.zone);
+    tzEl.value = String(cfg.tz);
     onEl.checked = cfg.on;
     claimedAt = readClaimTs();
     quotaAt = readQuotaAt();

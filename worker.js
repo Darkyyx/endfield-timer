@@ -16,7 +16,7 @@
 /* Worker 版本号。页面会拿它和自身版本比对，不一致就提示"该重新部署 Worker 了" —— 
    否则改了 worker.js 却忘了部署，会表现为"功能不生效"且毫无线索。
    发新版时与 index.html 页脚的版本号保持一致。 */
-const WORKER_VERSION = '1.14.0';
+const WORKER_VERSION = '1.15.0';
 
 const DEFAULTS = {
   // 推送到某个产线达到上限/下限前多少秒开始预警
@@ -133,91 +133,52 @@ function decideAlert(prev, level) {
   return null;
 }
 
-/* ================= 时区（IANA 标识符） ================= */
+/* ================= 时区（固定 UTC 偏移） ================= */
 
 /**
- * 为什么必须显式指定时区：Cloudflare Workers 的运行时是 UTC，`getHours()` 拿到的
+ * 为什么必须显式指定时区：Cloudflare Workers 的运行时是 UTC，getHours() 拿到的
  * 永远是 UTC 时刻，和用户实际所在时区无关——直接用它会让通知里的预计时间差 8 小时。
  *
- * 用 IANA 标识符（如 Asia/Shanghai）而不是固定偏移，是因为它自带夏令时规则：
- * 柏林在 1 月是 UTC+1、7 月是 UTC+2，写死偏移会在夏令时期间整体差一小时。
+ * 用固定偏移而不是 IANA 标识符：本项目不追求跨夏令时的绝对准确，
+ * 固定偏移实现简单、可预测，也不会因为浏览器 ICU 版本差异导致列表缺城市。
+ * 注意 POSIX 时区串的符号与常识相反，UTC+8 要写成 "UTC-8"。
  */
-const DEFAULT_TZ = 'Asia/Shanghai';
+const DEFAULT_TZ = 8;      // 北京时间
 
-/** 不含斜杠的合法取值（Intl 都认） */
-const BARE_ZONES = { UTC: 1, GMT: 1 };
-
-/**
- * 校验并规范化时区标识符。
- * 非法值一律回落到默认时区，避免把一个会让 formatToParts 抛异常的字符串塞进配置。
- */
-function normZone(tz) {
-  const s = String(tz == null ? '' : tz).trim();
-  if (!s) return DEFAULT_TZ;
-  if (BARE_ZONES[s]) return s;
-  // IANA 形如 Area/Location，允许字母数字、下划线、加号、减号
-  if (!/^[A-Za-z]{2,}\/[A-Za-z0-9_+\-]{2,}(\/[A-Za-z0-9_+\-]{2,})?$/.test(s)) return DEFAULT_TZ;
-  if (/^Etc\//.test(s)) return DEFAULT_TZ;      // Etc/GMT+8 的符号与直觉相反，不接受
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: s }).format(new Date());
-    return s;
-  } catch (e) {
-    return DEFAULT_TZ;
-  }
+/** 小时偏移 → POSIX 时区串。符号相反：UTC+8 → "UTC-8"，UTC-5 → "UTC+5"。 */
+function posixZone(offset) {
+  const raw = Number(offset);
+  const o = isFinite(raw) ? raw : DEFAULT_TZ;   // 缺省按默认时区，别让 undefined 悄悄变成 UTC
+  if (o === 0) return 'UTC';
+  const sign = o > 0 ? '-' : '+';
+  const abs = Math.abs(o);
+  const h = Math.floor(abs);
+  const m = Math.round((abs - h) * 60);
+  return 'UTC' + sign + h + (m ? ':' + String(m).padStart(2, '0') : '');
 }
 
-/** 某个时刻在该时区的 UTC 偏移（小时，可为小数），带夏令时 */
-function zoneOffsetHours(ms, tz) {
-  const zone = normZone(tz);
-  try {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: zone, timeZoneName: 'longOffset'
-    }).formatToParts(new Date(ms));
-    const name = (parts.find(function (p) { return p.type === 'timeZoneName'; }) || {}).value || '';
-    const m = name.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
-    if (m) {
-      const v = Number(m[2]) + (m[3] ? Number(m[3]) / 60 : 0);
-      return m[1] === '-' ? -v : v;
-    }
-    if (/GMT/.test(name)) return 0;
-  } catch (e) { /* 落到下面的日历算法 */ }
-
-  // 老引擎没有 timeZoneName: 'longOffset'：用"本地钟点 - UTC 钟点"反推
-  try {
-    const p = new Intl.DateTimeFormat('en-US', {
-      timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
-    }).formatToParts(new Date(ms));
-    const g = function (t) { return Number((p.find(function (x) { return x.type === t; }) || {}).value); };
-    const asUTC = Date.UTC(g('year'), g('month') - 1, g('day'), g('hour') % 24, g('minute'), g('second'));
-    return Math.round((asUTC - Math.floor(ms / 1000) * 1000) / 60000) / 60;
-  } catch (e) {
-    return 0;
-  }
+/** 解析小时偏移；缺失或越界时回落到 +8（北京时间）。支持半小时偏移。 */
+function tzOffset(tz) {
+  const o = Number(tz);
+  if (!isFinite(o) || o < -12 || o > 14) return DEFAULT_TZ;
+  return Math.round(o * 2) / 2;
 }
 
 /** 偏移的可读标签，形如 UTC+8 / UTC+5:30 / UTC-3 */
-function offsetLabel(offset) {
-  const o = Number(offset) || 0;
+function tzLabel(tz) {
+  const o = tzOffset(tz);
   const v = Math.abs(o);
   const h = Math.floor(v);
   const m = Math.round((v - h) * 60);
   return 'UTC' + (o < 0 ? '-' : '+') + h + (m ? ':' + String(m).padStart(2, '0') : '');
 }
 
-/** 时区在某个时刻的展示名，形如 "Asia/Shanghai（UTC+8）" */
-function tzLabel(tz, ms) {
-  const zone = normZone(tz);
-  return zone + '（' + offsetLabel(zoneOffsetHours(ms == null ? Date.now() : ms, zone)) + '）';
-}
-
-/** 在指定时区里格式化某个时刻；withDate 为真时带上日期 */
+/** 在指定偏移的时区里格式化某个时刻；withDate 为真时带上日期 */
 function fmtInZone(ms, tz, withDate) {
-  const zone = normZone(tz);
   const p = function (n) { return String(n).padStart(2, '0'); };
   try {
     const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: zone,
+      timeZone: posixZone(tz),
       year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit', hour12: false
     }).formatToParts(new Date(ms));
@@ -225,15 +186,14 @@ function fmtInZone(ms, tz, withDate) {
     const clock = get('hour') + ':' + get('minute');
     return withDate ? (get('month') + '-' + get('day') + ' ' + clock) : clock;
   } catch (e) {
-    // 极端环境下 Intl 不可用：退回该时刻的固定偏移手算
-    const shifted = new Date(ms + zoneOffsetHours(ms, zone) * 3600000);
+    // 极端环境下 Intl 不可用：手算固定偏移，结果一致
+    const shifted = new Date(ms + tzOffset(tz) * 3600000);
     const clock = p(shifted.getUTCHours()) + ':' + p(shifted.getUTCMinutes());
     return withDate
       ? p(shifted.getUTCMonth() + 1) + '-' + p(shifted.getUTCDate()) + ' ' + clock
       : clock;
   }
 }
-
 /** 只给时刻，形如 14:32 —— 日期由 App 自身的通知时间体现，不重复写 */
 function fmtClock(ms, tz) {
   return fmtInZone(ms, tz, false);
@@ -273,7 +233,7 @@ function composeItemMessage(item, now, tz) {
 /* 仅供本地 worker.test.mjs 调用；Cloudflare 只使用 default 导出，多一个具名导出不影响运行 */
 export const __test = {
   projectStock, evaluateLevel, decideAlert, composeItemMessage, fmtClock,
-  normZone, zoneOffsetHours, offsetLabel, tzLabel, fmtInZone, DEFAULT_TZ,
+  posixZone, tzOffset, tzLabel, fmtInZone, DEFAULT_TZ,
   quotaMessage, quotaResetText,
   deriveUid, resolveCredentials, effectiveConfig,
   quotaCooldown, pendingWrites
@@ -376,7 +336,7 @@ async function effectiveConfig(env, cfg) {
       empty: at.empty !== false
     },
     // 展示用时区（IANA 标识符）。meta 里没有就用 Worker 环境变量，再没有就默认上海。
-    timeZone: normZone(
+    timeZone: tzOffset(
       (meta.timeZone != null && meta.timeZone !== '') ? meta.timeZone
         : ((cfg.TIME_ZONE != null && cfg.TIME_ZONE !== '') ? cfg.TIME_ZONE : DEFAULT_TZ)),
     lastQuotaAt: num(meta.lastQuotaAt)
@@ -404,17 +364,14 @@ const QUOTA_RE = /limit exceeded|quota|429|daily/i;
 
 /**
  * 额度重置时刻的文案。
- * Cloudflare 按 **UTC 零点** 重置额度，所以本地钟点取决于用户选的时区：
- * Asia/Shanghai → 8:00，Asia/Tokyo → 9:00，America/New_York → 前一天 19:00（冬令时）。
- * 偏移按"重置那一刻"的时区规则算，夏令时切换后钟点会自然跟着变。
+ * Cloudflare 按 **UTC 零点** 重置额度，所以本地钟点取决于用户选的偏移：
+ * UTC+8 → 8:00，UTC+9 → 9:00，UTC-5 → 前一天 19:00。
  * 时区未知（例如还没拿到配置就出错的路径）时只说"次日"，不写死时间，避免误导。
  */
 function quotaResetText(tz) {
   if (tz == null || tz === '') return '次日重置';
-  // 下一个 UTC 零点就是重置时刻；用它的偏移来算本地钟点
-  const now = Date.now();
-  const nextUtcMidnight = (Math.floor(now / 86400000) + 1) * 86400000;
-  const o = zoneOffsetHours(nextUtcMidnight, tz);
+  // Cloudflare 按 UTC 零点重置，换成固定偏移的本地钟点
+  const o = tzOffset(tz);
   const h = ((24 + o) % 24 + 24) % 24;
   const mm = Math.round((h - Math.floor(h)) * 60);
   const hh = Math.floor(h);
@@ -525,9 +482,10 @@ async function handleSync(request, env, cfg) {
   // 前端设置面板里的"预警提前量""提醒方向""展示时区"以这里为准，避免两处配置打架
   const warnMinutes = num(body && body.warnMinutes);
   const at = (body && body.alertTypes) || null;
-  const tzRaw = body && typeof body.timeZone === 'string' ? body.timeZone.trim() : '';
-  const tzIn = tzRaw ? normZone(tzRaw) : '';
-  if (warnMinutes > 0 || at || tzIn) {
+  // 只要页面明确带了 timeZone 字段就采纳（越界值由 tzOffset 规范成默认值）；
+  // 只有完全没带这个字段时才保留原值，这样旧版页面不会把已设置的时区清掉。
+  const tzGiven = !!(body && body.timeZone != null && body.timeZone !== '');
+  if (warnMinutes > 0 || at || tzGiven) {
     const prev = (await env.STATE.get('meta:config', 'json')) || {};
     const next = {
       warnMinutes: warnMinutes > 0 ? Math.min(720, warnMinutes) : num(prev.warnMinutes) || 30,
@@ -535,7 +493,7 @@ async function handleSync(request, env, cfg) {
         ? { full: at.full !== false, empty: at.empty !== false }
         : (prev.alertTypes || { full: true, empty: true }),
       // 时区只在页面明确上报时覆盖；缺失时保留原值，避免旧版页面把设置清掉
-      timeZone: tzIn || (prev.timeZone != null ? prev.timeZone : undefined)
+      timeZone: tzGiven ? tzOffset(body.timeZone) : (prev.timeZone != null ? prev.timeZone : undefined)
     };
     // 只有真的变了才写，避免每次心跳都消耗一次写入额度
     if (next.warnMinutes !== num(prev.warnMinutes)

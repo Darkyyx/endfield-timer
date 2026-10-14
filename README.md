@@ -110,7 +110,7 @@ node worker.quota.test.mjs    # KV 每日写入额度预算（防止再把额度
 node worker.quota-ui.test.mjs # 额度用尽时的状态上报与页面红灯
 node worker.hud.test.mjs      # 右上角状态计数、同步灯与文案
 node worker.font.test.mjs     # 显示设置（字体仅存本机）与预警数字配色
-node worker.timezone.test.mjs # IANA 时区换算（含夏令时）、通知时刻、额度重置文案
+node worker.timezone.test.mjs # 时区偏移换算、通知时刻、额度重置文案
 ```
 
 七个脚本都不需要任何依赖。
