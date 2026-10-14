@@ -16,7 +16,7 @@
 /* Worker 版本号。页面会拿它和自身版本比对，不一致就提示"该重新部署 Worker 了" —— 
    否则改了 worker.js 却忘了部署，会表现为"功能不生效"且毫无线索。
    发新版时与 index.html 页脚的版本号保持一致。 */
-const WORKER_VERSION = '1.16.2';
+const WORKER_VERSION = '1.16.3';
 
 const DEFAULTS = {
   // 推送到某个产线达到上限/下限前多少秒开始预警
@@ -560,8 +560,9 @@ async function handleSync(request, env, cfg) {
     // 所以只读请求（dirty=false）也能如实把它报给页面
     const qAt = num(prev.lastQuotaAt) || num(prev.lastQuota);
     if (qAt > lastQuota) lastQuota = qAt;
-    // 如实汇报：KV 里有多少行不属于本页面（含换域名后的残留）。
-    // "刚接管完要不要再问一次"是页面的判断，不在这里替它决定。
+    /* 如实汇报：KV 里有多少行不是本页面写的（含换域名后的残留）。
+       只有真的删掉时才递减：被跳过的行（推送冷却期、或本轮 dirty=false）
+       会一直留在 KV 里，必须继续计入，否则页面会反复看到"正在清理 N 条"。 */
     const foreign = !!clientId && String(prev.client || '') !== clientId;
     if (foreign) foreignRows++;
     if (num(prev.lastPushAt) > lastPushAt) {
@@ -576,6 +577,7 @@ async function handleSync(request, env, cfg) {
     if (misses >= cfg.DELETE_AFTER_MISSES) {
       delKeys.push(k.name);
       removed++;
+      if (foreign) foreignRows--;      // 已回收，不再算作残留
     } else {
       prev.misses = misses;
       missPuts.push({ key: k.name, value: JSON.stringify(prev) });

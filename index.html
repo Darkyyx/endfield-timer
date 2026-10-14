@@ -656,7 +656,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.16.2</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.16.3</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -670,7 +670,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.16.2';
+  const PAGE_VERSION = '1.16.3';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1281,6 +1281,8 @@
     let quotaAt = 0;          // KV 额度用尽的时间（0 = 正常）
     let readOnly = false;     // 用户选了"不导入"，本页面保持只读
     let claiming = false;
+    let foreignChecked = false;   // 本次会话是否已判定过"要不要问导入"（只判定一次）
+    let pendingLocalRows = 0;     // 加载时本地有几条数据：为空才值得问导入
 
     /* ---------- 时区：固定 UTC 偏移 ---------- */
     /* 列表从 +14 递减到 -12，每档只放一个最有代表性的城市。
@@ -1540,12 +1542,20 @@
       }
       setQuotaAt(0);
 
-      // 刚接管完的那段时间里，KV 里还留着旧 client 的行（要缺席两轮才清掉）。
-      // 那不是"新发现的旧数据"，不该再问一次，否则接管成功后会立刻被重复追问。
+      /* 接管询问分两种情况，不要混在一起：
+         · 手动点了「立即同步」（forced=true）：用户主动要求，明确告诉他 Worker 上有
+           别的数据，由他决定导入还是保持只读。
+         · 自动同步：只在"本次会话第一次且本地本来就没有数据"时问一次。
+           快速新增/删除会连着触发多次同步，每次都判定就会反复弹框；
+           本地已经有数据时也没必要导入，那只会打断你正在做的事。
+         两种情况下如果用户选了"不导入"，readOnly 会置位，后续都不会再问。 */
       const foreign = num(data.foreignRows, 0);
       const claimingRecently = Date.now() - num(claimedAt, 0) < CLAIM_QUIET_MS;
-      if (foreign > 0 && !claimingRecently && !readOnly && declinedFor() !== clientId()) {
-        foreignRows = foreign;
+      if (foreign > 0) foreignRows = foreign;
+      const autoCheck = !foreignChecked && num(pendingLocalRows, 0) === 0;
+      foreignChecked = true;
+      if (foreign > 0 && !readOnly && (forced || autoCheck)
+        && !claimingRecently && declinedFor() !== clientId()) {
         blockedOwner = (data.owner && data.owner.host) || '';
         askImport();
         return;
@@ -1554,13 +1564,13 @@
       if (data.lastPushOk === false && data.lastError) {
         setStatus('err', '推送异常：' + data.lastError);
       } else {
+        /* 只说"数据同步"这一件事：本轮推了几条、Worker 写没写、有没有顺带回收残留。
+           注意 foreign 是"Worker 手里不属于本页面的行数"，包含还没来得及回收的量，
+           所以措辞用"待回收"，不要写成"待接管"（那会让人以为还需要再操作一次）。 */
         const tail = foreign > 0
-          ? (claimingRecently
-            ? '（正在清理 ' + foreign + ' 条旧数据）'
-            : '（另有 ' + foreign + ' 条别处数据待接管）')
+          ? (claimingRecently ? '（另待回收 ' + foreign + ' 条旧数据）'
+            : '（Worker 上另有 ' + foreign + ' 条其它来源的数据）')
           : (num(data.writes, 0) === 0 && !forced ? '（无改动）' : '');
-        /* 这里只说"数据同步"这一件事：本轮推了几条、Worker 写没写。
-           有没有发出过告警是另一回事，混进来会让人读成自相矛盾。 */
         setStatus('ok', '已同步 ' + data.rows + ' 条' + tail);
       }
     }
@@ -1862,6 +1872,8 @@
     onEl.checked = cfg.on;
     claimedAt = readClaimTs();
     quotaAt = readQuotaAt();
+    // 记下"加载时本地有几条"：为空才在首次同步时问要不要导入 Worker 上的数据
+    pendingLocalRows = rows.length;
     fullEl.checked = cfg.warnFull;
     emptyEl.checked = cfg.warnEmpty;
     setStatus(
