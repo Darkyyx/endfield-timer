@@ -1,0 +1,10 @@
+# 本地自测脚本：保留在本地用于回归验证，但不发布到仓库
+worker.test.mjs
+worker.owner.test.mjs
+worker.quota.test.mjs
+worker.quota-ui.test.mjs
+worker.quota-outage.test.mjs
+worker.hud.test.mjs
+worker.font.test.mjs
+worker.timezone.test.mjs
+worker.delete.test.mjs
