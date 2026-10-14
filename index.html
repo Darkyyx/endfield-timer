@@ -340,25 +340,23 @@
     font-variant-numeric:tabular-nums;
     color:var(--dim);
   }
-  .cd-sub{
-    font-family:var(--mono-user);font-size:12px;color:#4d5762;
-    letter-spacing:.03em;margin-top:4px;white-space:nowrap;
-    overflow:hidden;text-overflow:ellipsis;
-  }
-  .cd-eta{
+  /* 倒计时列只有两行：大字是剩余时间，下面一行是目标时刻或状态说明。
+     净速率不再显示 —— 三行挤在这一列里信息密度过高，
+     而且生产/分 与 消耗/分 本身就是可输入的列，速率只是它们的差。 */
+  .cd-note{
     font-family:var(--mono-user);font-size:11.5px;color:#3f4850;
-    letter-spacing:.02em;margin-top:3px;white-space:nowrap;
+    letter-spacing:.02em;margin-top:4px;white-space:nowrap;
     overflow:hidden;text-overflow:ellipsis;
     font-variant-numeric:tabular-nums;
   }
 
   /* 生产 > 消耗：绿色，爆仓倒计时（目标达成） */
   .st-filling .cd-time{color:var(--green);text-shadow:0 0 16px rgba(110,227,122,.32)}
-  .st-filling .cd-eta{color:#5a7a5e}
+  .st-filling .cd-note{color:#5a7a5e}
 
   /* 消耗 > 生产：红色，耗尽倒计时（危险） */
   .st-draining .cd-time{color:var(--red);text-shadow:0 0 16px rgba(255,90,82,.4)}
-  .st-draining .cd-eta{color:#8a4a48}
+  .st-draining .cd-note{color:#8a4a48}
 
   /* 已爆仓：亮绿，目标已达成 */
   .st-full .cd-time{color:var(--green-bright);text-shadow:0 0 16px rgba(168,232,106,.38)}
@@ -656,7 +654,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.16.4</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.17.0</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -670,7 +668,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.16.4';
+  const PAGE_VERSION = '1.17.0';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -877,9 +875,6 @@
     if (!Number.isFinite(n)) return '—';
     return Math.round(n).toLocaleString('en-US');
   }
-  function fmtRate(n) {
-    return String(round2(n));
-  }
   function fmtDur(sec) {
     sec = Math.max(0, Math.floor(sec));
     const d = Math.floor(sec / 86400);
@@ -891,15 +886,44 @@
       ? d + '天 ' + p(h) + ':' + p(m) + ':' + p(s)
       : p(h) + ':' + p(m) + ':' + p(s);
   }
+  /* ---------- 目标时刻：按设置面板里选的时区显示 ----------
+     为什么不用浏览器本机时区：通知里的预计时间用的是设置里的固定偏移，
+     页面若按本机时区渲染，就会出现"页面写 14:32、手机收到 15:32"这种对不上的情况。
+     统一走同一个偏移，两边才一致。 */
+  function pageTzOffset() {
+    return (notify && notify.tzOffset) ? notify.tzOffset() : 8;
+  }
+
+  /** 把某时刻换算到指定偏移后，取它的年月日与时分 */
+  function wallClock(ms, off) {
+    const d = new Date(ms + off * 3600000);   // 偏移后的"墙上时间"，故按 UTC 取值
+    return {
+      y: d.getUTCFullYear(), mo: d.getUTCMonth() + 1, d: d.getUTCDate(),
+      h: d.getUTCHours(), mi: d.getUTCMinutes(), dow: d.getUTCDay()
+    };
+  }
+
+  /** 两个"墙上日期"相差几天（用 UTC 零点表示日期，避开时分干扰） */
+  function daysBetween(a, b) {
+    return Math.round((Date.UTC(b.y, b.mo - 1, b.d) - Date.UTC(a.y, a.mo - 1, a.d)) / 86400000);
+  }
+
+  /**
+   * 目标时刻的显示文案。
+   * 只写 "14:32" 会有跨天歧义，所以按距今远近加前缀：
+   *   今天 / 明天 / 周三 / 10-25
+   */
   function fmtEta(date) {
-    const p = function (n) { return String(n).padStart(2, '0'); };
-    const now = new Date();
-    const prefix = (date.getFullYear() === now.getFullYear())
-      ? ''
-      : date.getFullYear() + '-';
-    return prefix
-      + p(date.getMonth() + 1) + '-' + p(date.getDate()) + ' '
-      + p(date.getHours()) + ':' + p(date.getMinutes());
+    const off = pageTzOffset();
+    const t = wallClock(date.getTime(), off);
+    const n = wallClock(Date.now(), off);
+    const p = function (x) { return String(x).padStart(2, '0'); };
+    const clock = p(t.h) + ':' + p(t.mi);
+    const days = daysBetween(n, t);
+    if (days === 0) return '今天 ' + clock;
+    if (days === 1) return '明天 ' + clock;
+    if (days > 1 && days < 7) return '周' + '日一二三四五六'.charAt(t.dow) + ' ' + clock;
+    return p(t.mo) + '-' + p(t.d) + ' ' + clock;
   }
   function escAttr(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -959,8 +983,7 @@
       '</div>' +
       '<div class="cell cd">' +
         '<div class="cd-time">--:--:--</div>' +
-        '<div class="cd-sub"></div>' +
-        '<div class="cd-eta"></div>' +
+        '<div class="cd-note"></div>' +
       '</div>' +
       '<div class="cell act">' +
         '<button class="ico edit-btn" type="button" title="修改">✎</button>' +
@@ -1901,6 +1924,8 @@
     return {
       hudHtml: hudHtml,
       warnMinutes: function () { return cfg.warn; },
+      // 页面渲染目标时刻要用同一个偏移，才能和通知里的时间对得上
+      tzOffset: function () { return cfg.tz; },
       scheduleSync: scheduleSync,
       syncNow: syncNow,
       onEditingChange: onEditingChange,
@@ -1920,8 +1945,7 @@
     const remainVal = el.querySelector('.remain-val');
     const barI      = el.querySelector('.bar i');
     const cdTime    = el.querySelector('.cd-time');
-    const cdSub     = el.querySelector('.cd-sub');
-    const cdEta     = el.querySelector('.cd-eta');
+    const cdNote    = el.querySelector('.cd-note');
 
     remainVal.textContent = fmtNum(c.remain);
 
@@ -1949,30 +1973,25 @@
     if (c.state === 'full') {
       el.classList.add('st-full');
       cdTime.textContent = '已爆仓';
-      cdSub.textContent = '上限 ' + fmtNum(c.cap);
-      cdEta.textContent = '';
+      cdNote.textContent = fmtNum(c.cap);
     } else if (c.state === 'filling') {
       el.classList.add('st-filling');
       cdTime.textContent = fmtDur(c.seconds);
-      cdSub.textContent = '净 +' + fmtRate(c.net) + ' /分';
-      cdEta.textContent = '爆仓 ' + fmtEta(new Date(Date.now() + c.seconds * 1000));
+      cdNote.textContent = '爆仓 ' + fmtEta(new Date(Date.now() + c.seconds * 1000));
       if (c.seconds < 1800) cdTime.classList.add('urgent');
     } else if (c.state === 'draining') {
       el.classList.add('st-draining');
       cdTime.textContent = fmtDur(c.seconds);
-      cdSub.textContent = '净 ' + fmtRate(c.net) + ' /分';
-      cdEta.textContent = '耗尽 ' + fmtEta(new Date(Date.now() + c.seconds * 1000));
+      cdNote.textContent = '耗尽 ' + fmtEta(new Date(Date.now() + c.seconds * 1000));
       if (c.seconds < 1800) cdTime.classList.add('urgent');
     } else if (c.state === 'empty') {
       el.classList.add('st-empty');
       cdTime.textContent = '已耗尽';
-      cdSub.textContent = '当前存量为 0';
-      cdEta.textContent = '';
+      cdNote.textContent = '0';
     } else {
       el.classList.add('st-idle');
       cdTime.textContent = '——';
-      cdSub.textContent = '产销平衡';
-      cdEta.textContent = '';
+      cdNote.textContent = '产销平衡';
     }
   }
 
