@@ -129,6 +129,29 @@ await check('默认中文字体栈按名字列出常见中文字体，且 CSS �
   return css.slice(0, 46) + '…';
 });
 
+await check('默认字体栈不含会触发可见性警告的字体', () => {
+  // 这两个字体会让 Firefox 每次解析字体栈都打一条
+  // "blocked at visibility level 2" 警告，而且都有系统级替代品
+  const stacks = [
+    (html.match(/--font-zh:([^;]+);/) || [])[1] || '',
+    (html.match(/--mono-user:([^;]+);/) || [])[1] || '',
+    (code.match(/const DEFAULT_ZH = '([^']+)'/) || [])[1] || '',
+    (code.match(/const DEFAULT_MONO = '([^']+)'/) || [])[1] || ''
+  ];
+  stacks.forEach(s => {
+    assert(s.indexOf('Source Han Sans SC') < 0, '默认栈里仍有 Source Han Sans SC：' + s);
+    assert(s.indexOf('Cascadia Mono') < 0, '默认栈里仍有 Cascadia Mono：' + s);
+  });
+  return '已移除会报警的两个字体';
+});
+
+await check('等宽默认栈里有 Consolas 作为 Windows 等宽首选', () => {
+  const mono = (code.match(/const DEFAULT_MONO = '([^']+)'/) || [])[1] || '';
+  assert(/Consolas/.test(mono), '缺少 Consolas：' + mono);
+  assert(mono.indexOf('Consolas') < mono.indexOf('Microsoft YaHei'), '等宽字体应排在中文链之前：' + mono);
+  return mono;
+});
+
 await check('含空格的字族名自动加引号（不加引号会被 CSS 当成多个字体名而失效）', () => {
   const { getEl, cssVars } = boot([]);
   getEl('fnZh').value = 'Maple Mono NF CN';
@@ -162,7 +185,7 @@ await check('用逗号写完整字体栈时原样保留', () => {
 await check('全空时数字区回到默认等宽栈，且带中文字体链（不被 Barlow 接管）', () => {
   const { cssVars } = boot([]);
   const mono = cssVars['--mono-user'] || '';
-  assert(/Cascadia Mono/.test(mono), '数字默认栈不对：' + mono);
+  assert(/Consolas/.test(mono), '数字默认栈不对：' + mono);
   assert(!/Barlow/.test(mono), '数字区不该被 Barlow 接管：' + mono);
   // 这些位置也含中文（h1 span、.hint、面板标题），缺中文链会掉到 monospace 通用族的点阵宋体
   assert(/Microsoft YaHei/.test(mono), '默认数字栈缺少中文字体链：' + mono);

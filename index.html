@@ -23,8 +23,13 @@
        而且只用于"两个输入框都留空"时的观感（脚本会覆盖它们），见 applyFonts()。
        中文默认写成"显式指定常见中文字体"而不是单个 Noto Sans SC：后者多数机器没装，
        一路回退到通用 sans-serif 后，浏览器给中文选的字体和显式指定时不是同一条渲染路径，
-       观感会明显发虚。按名字列出来能保证命中系统里真实存在的字体。 */
-    --font-zh:"Noto Sans SC","Microsoft YaHei","PingFang SC","Hiragino Sans GB","Source Han Sans SC","WenQuanYi Micro Hei",sans-serif;
+       观感会明显发虚。按名字列出来能保证命中系统里真实存在的字体。
+
+       列表里刻意不放这些字体（它们会触发 Firefox 的字体可见性警告，且都有系统级替代品）：
+         Source Han Sans SC —— 常被用户级安装，网页读不到，警示 "blocked at visibility level"
+         Cascadia Mono      —— 与系统自带的 "Cascadia Mono Regular" 同名冲突，同样会报警
+       Consolas / Noto Sans SC / 微软雅黑 / 苹方 都是系统级或随系统分发，命中稳定且无警告。 */
+    --font-zh:"Noto Sans SC","Microsoft YaHei","PingFang SC","Hiragino Sans GB","WenQuanYi Micro Hei",sans-serif;
     /* 英文默认靠 system-ui：Windows 得到 Segoe UI、macOS 得到 San Francisco、Linux 得到发行版默认。
        Barlow 放在最前是为了页面原本的观感，机器上没装就自然跳过。 */
     --font-en:"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
@@ -32,7 +37,7 @@
        注意这些位置也含中文（h1 span、.hint、面板标题），所以中文字体链必须跟在后面：
        只写等宽字体的话，汉字会落到 monospace 通用族的中文兜底（Windows 上是点阵宋体，很难看）。
        ui-monospace 只有 Safari 认，其他浏览器会跳过（它不会作为关键字在字体列表里展开）。 */
-    --mono-user:ui-monospace,"Cascadia Mono",Consolas,"Noto Sans SC","Microsoft YaHei","PingFang SC",monospace;
+    --mono-user:ui-monospace,Consolas,"Noto Sans SC","Microsoft YaHei","PingFang SC",monospace;
     --font-body:var(--font-zh),var(--font-en),sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0}
@@ -644,7 +649,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.11.4</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.11.5</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -658,7 +663,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.11.4';
+  const PAGE_VERSION = '1.11.5';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1843,12 +1848,13 @@
 
   /* ================= 显示设置（字体，仅存本机） ================= */
   const FONT_KEY = 'endfield_font_v1';
-  /* 空值时的兜底字体栈：保持改造前的默认观感。
-     中文字体按名字列出系统里真实存在的常见字体——只写一个多数机器没装的字体，
-     会一路回退到通用 sans-serif，中文观感明显发虚（与 CSS :root 里的值保持一致）。 */
-  const DEFAULT_ZH = '"Noto Sans SC","Microsoft YaHei","PingFang SC","Hiragino Sans GB","Source Han Sans SC","WenQuanYi Micro Hei",sans-serif';
+  /* 空值时的兜底字体栈：与 CSS :root 里的值保持一致。
+     刻意不放 Source Han Sans SC 与 Cascadia Mono——前者常被用户级安装、网页读不到，
+     后者与系统自带的 "Cascadia Mono Regular" 同名冲突，两者都会触发
+     Firefox 的字体可见性警告（"blocked at visibility level"）。 */
+  const DEFAULT_ZH = '"Noto Sans SC","Microsoft YaHei","PingFang SC","Hiragino Sans GB","WenQuanYi Micro Hei",sans-serif';
   const DEFAULT_LATIN = '"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif';
-  const DEFAULT_MONO = 'ui-monospace,"Cascadia Mono",Consolas,"Noto Sans SC","Microsoft YaHei","PingFang SC",monospace';
+  const DEFAULT_MONO = 'ui-monospace,Consolas,"Noto Sans SC","Microsoft YaHei","PingFang SC",monospace';
 
   /**
    * 把用户输入的字族名安全地拼成 CSS 值。
