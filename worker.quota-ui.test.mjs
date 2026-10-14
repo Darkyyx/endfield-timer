@@ -243,23 +243,41 @@ await check('发过通知与否，状态文案完全一样', async () => {
   return msgA;
 });
 
-await check('本地数据与上次同步一致时，进入页面不发任何请求', async () => {
-  // 这是用户实际观察到的：刷新页面不该白发一次"无改动"的同步
-  const synced = JSON.stringify([{ id: 'a', name: '源矿', remark: '', region: 'wuling', prod: 1, cons: 0, stock: 100, ts: 1780000000000 }]);
-  const { sent } = boot(okReply, [['endfield_synced_rows_v1', synced]], synced);
+/* 按页面 rowsSnapshot() 的键序生成行指纹，避免手写 JSON 时键序不一致导致比对失败 */
+function snap(rows) {
+  return JSON.stringify(rows.map(r => ({
+    id: r.id, name: r.name, remark: r.remark || '', region: r.region,
+    prod: r.prod, cons: r.cons, stock: r.stock, ts: r.ts
+  })));
+}
+const ROW = (ts) => [{ id: 'a', name: '源矿', remark: '', region: 'wuling', prod: 1, cons: 0, stock: 100, ts: ts }];
+
+await check('加载时总会同步一次：没改动也发请求，但带 dirty=false（Worker 不写 KV）', async () => {
+  // 发请求是为了让状态灯有确定结果；dirty=false 才是省额度的地方
+  // writes=0 是"Worker 一个键都没写"的如实回执，状态里应据此标注（无改动）
+  const only = ROW(1780000000000);
+  const { sent, getEl } = boot(Object.assign({}, okReply, { writes: 0 }),
+    [['endfield_synced_rows_v1', snap(only)]], JSON.stringify(only));
   await new Promise(r => setTimeout(r, 1700));
-  assert(sent().length === 0, '无改动仍然发了 ' + sent().length + ' 次请求');
-  return '0 次请求';
+  assert(sent().length === 1, '应发 1 次请求，实际 ' + sent().length);
+  assert(sent()[0].dirty === false, '无改动时 dirty 应为 false，实际 ' + sent()[0].dirty
+    + '（载荷 rows=' + JSON.stringify(sent()[0].rows) + '）');
+  // 状态灯必须从"等待首次同步…"变成确定结果
+  const msg = String(getEl('ntMsg').textContent);
+  assert(!/等待首次同步/.test(msg), '状态一直停在等待首次同步：' + msg);
+  assert(/^已同步 \d+ 条（无改动）$/.test(msg), '应给出确定结果：' + msg);
+  return msg + ' / dirty=false';
 });
 
-await check('本地有未同步的改动时，进入页面补发一次', async () => {
-  const row = (ts) => JSON.stringify([{ id: 'a', name: '源矿', remark: '', region: 'wuling', prod: 1, cons: 0, stock: 100, ts: ts }]);
-  // 快照里是旧锚点，本地已经改过（ts 不同）→ 应补发
-  const { sent } = boot(okReply, [['endfield_synced_rows_v1', row(1780000000000)]], row(1780000900000));
+await check('有未同步改动时，加载同步带 dirty=true 且不标"无改动"', async () => {
+  // 快照是旧锚点，本地已改过（ts 不同）
+  const { sent, getEl } = boot(okReply, [['endfield_synced_rows_v1', snap(ROW(1780000000000))]], JSON.stringify(ROW(1780000900000)));
   await new Promise(r => setTimeout(r, 1700));
-  assert(sent().length === 1, '应补发一次，实际 ' + sent().length);
-  assert(sent()[0].dirty === true, '补发时应带 dirty=true');
-  return '1 次请求，dirty=true';
+  assert(sent().length === 1, '应发 1 次请求，实际 ' + sent().length);
+  assert(sent()[0].dirty === true, '有改动时 dirty 应为 true，实际 ' + sent()[0].dirty);
+  const msg = String(getEl('ntMsg').textContent);
+  assert(!/无改动/.test(msg), '有改动却被标成无改动：' + msg);
+  return msg + ' / dirty=true';
 });
 
 console.log('\nC. 手动「立即同步」不受自动优化约束');

@@ -656,7 +656,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.16.0</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.16.1</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -670,7 +670,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.16.0';
+  const PAGE_VERSION = '1.16.1';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1556,9 +1556,9 @@
           ? (claimingRecently
             ? '（正在清理 ' + foreign + ' 条旧数据）'
             : '（另有 ' + foreign + ' 条别处数据待接管）')
-          : '';
-        /* 这里只说"数据同步"这一件事。
-           有没有发出过告警是另一回事，不属于同步状态，早先混在一起会让人读成自相矛盾。 */
+          : (num(data.writes, 0) === 0 && !forced ? '（无改动）' : '');
+        /* 这里只说"数据同步"这一件事：本轮推了几条、Worker 写没写。
+           有没有发出过告警是另一回事，混进来会让人读成自相矛盾。 */
         setStatus('ok', '已同步 ' + data.rows + ' 条' + tail);
       }
     }
@@ -1724,14 +1724,16 @@
       // 只读（用户选了"不导入"）只约束**自动**同步；手动点「立即同步」是明确指令，
       // 照常发出去 —— 结果要么被 Worker 以 409 拒绝（会给出去向），要么真的推成功。
       if (readOnly && !force) return Promise.resolve();
-      // force=true（手动点「立即同步」）不走差异检查：用户明确要求推送，就照推。
-      // 省额度的 dirty 优化只该作用于自动同步，不该把手动操作也挡住。
-      const dirty = (force || !readOnly) ? true : dataDirty;
+      /* force=true（手动点「立即同步」）不走差异检查：用户明确要求推送，就照推。
+         自动同步则用 dataDirty 的真实值 —— 它由 save() 按内容比对得出。
+         注意不能写成 (force || !readOnly)：!readOnly 在非只读时恒为 true，
+         那样 dirty 永远是 true，"无改动就不写 KV"的优化会彻底失效。 */
+      const dirty = force ? true : dataDirty;
       setStatus('save', force ? '正在推送全部数据…' : '正在同步…');
       return fetch(base() + '/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Sync-Token': cfg.token },
-        body: buildPayload({ dirty: force ? true : dirty })
+        body: buildPayload({ dirty: dirty })
       }).then(function (r) { return readJson(r).then(function (j) { return applyReply(j, r.status, force); }); })
         .catch(function (e) { setStatus('err', '无法连接 Worker：' + (e && e.message ? e.message : e)); });
     }
@@ -1867,12 +1869,14 @@
         : (cfg.on ? (ready() ? '等待首次同步…' : '未填写 Worker 地址或同步令牌') : '未开启 · 数据只保存在本机')
     );
 
-    // 没有心跳定时器：挂机时不发任何请求，也不做"无改动"的同步。
-    // 同步只在这些时刻发生：本地数据与上次同步不一致时进入页面一次、
-    // 确认修改退出编辑态、删除条目、改动通知设置、点了「立即同步 / 接管 / 测试」。
-    // dataDirty 由 save() 按内容比对得出，所以刷新页面不会白发一次同步；
-    // 只读、或本地本来就没有数据（纯新建）时也不发，避免制造空快照事故。
-    if (enabled() && !readOnly && rows.length && dataDirty) scheduleSync(1500);
+    // 没有心跳定时器：挂机时不发任何请求。
+    // 同步发生在这些时刻：进入页面/刷新时一次、确认修改退出编辑态、删除条目、
+    // 改动通知设置、点了「立即同步 / 接管 / 测试」。
+    // 进入页面这次无论有没有改动都发：一是让状态灯有个确定结果（否则会一直停在
+    // "等待首次同步…"），二是新页面要认领数据源、并发现 Worker 上的别处数据。
+    // 没改动时 dataDirty=false，Worker 收到后一个键都不写，只消耗一次读。
+    // 只读、或本地本来就没有数据（纯新建）时不发，避免制造空快照事故。
+    if (enabled() && !readOnly && rows.length) scheduleSync(1500);
 
     window.addEventListener('pagehide', beacon);
 
