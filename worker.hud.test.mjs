@@ -149,6 +149,22 @@ await check('预警计数跟随设置的预警窗口', () => {
   return '30 分钟 → 正常；2000 分钟 → 预警';
 });
 
+await check('正常的数字：不为 0 时绿色，为 0 时与标签同色', () => {
+  const withNormal = rawHud(boot([
+    { id: 'a', name: 'N', prod: 0, cons: 0, stock: 0 }        // 产销平衡 → 正常 1
+  ]).getEl);
+  assert(/<span class="ok"><span class="k">正常<\/span><b class="on">1<\/b>/.test(withNormal),
+    '正常=1 时应带 on 类：' + withNormal);
+
+  const withoutNormal = rawHud(boot([
+    { id: 'b', name: 'W', prod: 100, cons: 0, stock: CAP - 1000 }   // 全部预警 → 正常 0
+  ]).getEl);
+  assert(/<span class="ok"><span class="k">正常<\/span><b class="">0<\/b>/.test(withoutNormal),
+    '正常=0 时不该带 on 类：' + withoutNormal);
+  assert(/\.stats \.ok b\.on\{color:var\(--green\)\}/.test(html), '缺少 on 配色规则');
+  return '1 → 绿色(on)，0 → 默认色';
+});
+
 await check('数字独立成块，不会与相邻数字连读', () => {
   const { getEl } = boot([{ id: 'a', name: 'X', prod: 0, cons: 0, stock: 0 }]);
   const h = rawHud(getEl);
