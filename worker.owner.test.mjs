@@ -123,20 +123,23 @@ await check('claim mode=replace → 清掉旧页面残留行', async () => {
   return 'removed = 2，自身数据保留';
 });
 
-await check('foreignRows：同属一个 client 的残留也会被计数并逐步清理', async () => {
+await check('foreignRows：同属一个 client 的残留也会被计数并清理', async () => {
   await ENV.STATE.put('row:mine', JSON.stringify({ id: 'mine', name: '我的', client: 'cB', prod: 1, cons: 0, stock: 1, ts: Date.now() }));
   await ENV.STATE.put('row:other', JSON.stringify({ id: 'other', name: '别处的', client: 'cOther', prod: 1, cons: 0, stock: 1, ts: Date.now(), misses: 0 }));
 
-  const res = await worker.fetch(req('/sync', rowPayload('cB', { clientHost: 'new.example' })), ENV, {});
-  const j = await res.json();
-  assert(j.foreignRows === 1, 'foreignRows = ' + j.foreignRows);
+  // dirty=false 的只读请求不碰缺席计数，所以先确认它不会误删
+  const ro = await worker.fetch(req('/sync', rowPayload('cB', { clientHost: 'new.example', dirty: false })), ENV, {});
+  const roj = await ro.json();
+  assert(roj.foreignRows === 1, 'foreignRows = ' + roj.foreignRows);
+  assert(roj.removed === 0, '只读请求不该删任何行，实际 removed = ' + roj.removed);
+  assert(!!(await ENV.STATE.get('row:other', 'json')), '只读请求误删了残留行');
 
-  // 第二次同步：缺席达到阈值，残留行被清掉
+  // 一次"整份快照"的同步就应清掉缺失的行（DELETE_AFTER_MISSES = 1）
   const res2 = await worker.fetch(req('/sync', rowPayload('cB', { clientHost: 'new.example' })), ENV, {});
   const j2 = await res2.json();
   assert(j2.removed >= 1, '残留未被清理，removed = ' + j2.removed);
   assert((await ENV.STATE.get('row:other', 'json')) === null, '残留行仍在');
-  return '第一次 foreignRows=1，第二次已清理';
+  return '只读不删；一次全量同步即清理';
 });
 
 await check('CLAIM_TOKEN 配置后，接管必须带令牌', async () => {

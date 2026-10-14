@@ -111,9 +111,10 @@ node worker.quota-ui.test.mjs # 额度用尽时的状态上报与页面红灯
 node worker.hud.test.mjs      # 右上角状态计数、同步灯与文案
 node worker.font.test.mjs     # 显示设置（字体仅存本机）与预警数字配色
 node worker.timezone.test.mjs # 时区偏移换算、通知时刻、额度重置文案
+node worker.delete.test.mjs   # 删除条目必须触发同步（否则 Worker 里会留下幽灵记录）
 ```
 
-七个脚本都不需要任何依赖。
+八个脚本都不需要任何依赖。
 
 ---
 

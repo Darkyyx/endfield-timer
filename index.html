@@ -656,7 +656,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.15.1</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.15.2</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -670,7 +670,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.15.1';
+  const PAGE_VERSION = '1.15.2';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1059,6 +1059,12 @@
       rows = rows.filter(function (r) { return r.id !== row.id; });
       save();
       render();
+      // 删除也要通知同步：否则 Worker 里那条记录会一直留着，继续参与巡检和告警。
+      // 不能只靠 onEditingChange —— 它在非编辑态点删除时不会被触发。
+      if (notify) {
+        notify.onEditingChange();
+        notify.scheduleSync(600);
+      }
     });
 
     applyEditing(el, row);
