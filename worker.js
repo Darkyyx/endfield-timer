@@ -59,9 +59,9 @@ const pendingWrites = new Map();   // key → 待补写的行数据
 
 // 等级 1/2 看涨（爆仓方向），3/4 看跌（耗尽方向）
 const LEVEL_META = {
-  1: { icon: '⚠', title: '即将爆仓', tag: '即将爆仓' },
+  1: { icon: '⚠️', title: '即将爆仓', tag: '即将爆仓' },
   2: { icon: '🛑', title: '已爆仓', tag: '爆仓' },
-  3: { icon: '⚠', title: '即将耗尽', tag: '即将耗尽' },
+  3: { icon: '⚠️', title: '即将耗尽', tag: '即将耗尽' },
   4: { icon: '🛑', title: '已耗尽', tag: '耗尽' }
 };
 
