@@ -19,13 +19,12 @@
     --green:#6ee37a;
     --green-bright:#a8e86a;
     --red-dark:#a83b36;
-    /* 字体顺序：中文字体在前、英文字体在后（中文在前是为了兜底，不影响英文渲染）。
-       注意顺序不能反：像 Maple Mono NF CN 这类中文字体自带拉丁字形，
-       放在前面时中英文都由它渲染；若把纯拉丁字体放前面，中文会先落到系统字体上。 */
+    /* 以下三个字体变量都被「显示设置」面板覆盖，这里的值只是页面加载瞬间的兜底。
+       实际顺序由面板里的「字体优先级」决定（脚本写内联样式），见 applyFonts()。 */
     --font-zh:"Noto Sans SC";
     --font-en:"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-    /* --mono-user 由脚本按设置覆盖（含引号规范化）；这里是没填任何字体时的原默认值。
-       页面里 13 处（倒计时、数字框、HUD、页脚等）都走这个变量。 */
+    /* --mono-user 供数字区域使用（倒计时、数字框、HUD、页脚等 14 处）。
+       全空时就是原来那套等宽字体栈，保持改造前的观感。 */
     --mono-user:ui-monospace,"Cascadia Mono",Consolas,monospace;
     --font-body:var(--font-zh),var(--font-en),sans-serif;
   }
@@ -576,10 +575,9 @@
         <label>
           <span class="k">字体优先级</span>
           <select class="inp sel" id="fnPriority">
-            <option value="en">英文字体优先</option>
-            <option value="zh">中文字体优先</option>
+            <option value="en">英文字体</option>
+            <option value="zh">中文字体</option>
           </select>
-          <span class="tip">中文字体若自带拉丁字形（如微软雅黑、Maple Mono），会影响英文与数字的显示</span>
         </label>
       </div>
       <div class="ntActions">
@@ -639,7 +637,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.11.0</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.11.1</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -653,7 +651,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.11.0';
+  const PAGE_VERSION = '1.11.1';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';

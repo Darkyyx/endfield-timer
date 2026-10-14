@@ -190,11 +190,14 @@ await check('优先级持久化，且非法值回落到英文优先', () => {
   return '已持久化并回填';
 });
 
-await check('优先级下拉框存在且有说明文字', () => {
-  assert(/id="fnPriority"/.test(html), '缺少优先级下拉框');
-  assert(/英文字体优先/.test(html) && /中文字体优先/.test(html), '缺少选项文案');
-  assert(/自带拉丁字形/.test(html), '缺少说明文字');
-  return '下拉框 + 说明';
+await check('优先级下拉框只有两个选项，且无多余说明文字', () => {
+  const panel = html.slice(html.indexOf('id="fontPanel"'), html.indexOf('id="ntPanel"'));
+  assert(/id="fnPriority"/.test(panel), '缺少优先级下拉框');
+  assert(/<option value="en">英文字体<\/option>/.test(panel), '选项文案应为"英文字体"');
+  assert(/<option value="zh">中文字体<\/option>/.test(panel), '选项文案应为"中文字体"');
+  assert(!/优先<\/option>/.test(panel), '选项里不该再带"优先"二字');
+  assert(!/自带拉丁字形/.test(panel), '说明文字应已删除');
+  return '英文字体 / 中文字体';
 });
 
 await check('面板文案：DISPLAY / NOTIFICATION，占位符为"使用默认"', () => {
