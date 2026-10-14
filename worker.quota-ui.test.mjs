@@ -114,11 +114,12 @@ function makeEl(tag) {
   };
 }
 
-function boot(reply, preStore) {
+function boot(reply, preStore, rowJson) {
   const els = Object.create(null);
   const getEl = id => (els[id] = els[id] || makeEl('div'));
   const store = new Map(preStore || []);
-  store.set('endfield_line_timer_v2', JSON.stringify([
+  /* rowJson 可覆盖"存储里的行内容"，用来构造"与上次同步快照一致/不一致"两种启动状态 */
+  store.set('endfield_line_timer_v2', rowJson || JSON.stringify([
     { id: 'a', name: '源矿', remark: '', region: 'wuling', prod: 1, cons: 0, stock: 100, ts: Date.now(), editing: false }
   ]));
   store.set('endfield_notify_v1', JSON.stringify({
@@ -217,39 +218,53 @@ await check('额度恢复（quota=0）后回到正常', async () => {
   return '同步 正常，标记已清除';
 });
 
-console.log('\nC0. 状态文案：同步结果与通知状态必须分得清');
+console.log('\nC0. 状态文案：只反映数据同步，不夹带通知状态');
 
-await check('没发过通知时说的是"尚无通知"，不是含糊的"尚未推送"', async () => {
-  const { getEl } = boot(Object.assign({}, okReply, { lastPushAt: 0 }));
+await check('状态里只有"已同步 N 条"，不带通知/推送之类的字眼', async () => {
+  const { getEl } = boot(Object.assign({}, okReply, { lastPushAt: 0, writes: 0 }));
   await new Promise(r => setTimeout(r, 1700));
   const msg = String(getEl('ntMsg').textContent);
-  assert(/已同步 \d+ 条/.test(msg), '应报出本轮同步条数：' + msg);
-  assert(/尚无通知（未到预警阈值）/.test(msg), '应说明还没触发过告警：' + msg);
-  // 旧文案会让人以为同步失败，必须彻底去掉
-  assert(!/尚未推送/.test(msg), '仍在用含糊的"尚未推送"：' + msg);
+  assert(/^已同步 \d+ 条/.test(msg), '应报出本轮同步结果：' + msg);
+  // 通知有没有发出过不属于"同步状态"，混在这里会读成自相矛盾
+  ['通知', '推送', '尚无', '未写入'].forEach(w => {
+    assert(msg.indexOf(w) < 0, '状态里不该出现「' + w + '」：' + msg);
+  });
   return msg;
 });
 
-await check('发过通知后显示"最近通知 + 时刻"', async () => {
-  const { getEl } = boot(Object.assign({}, okReply, { lastPushAt: Date.now() - 60000 }));
+await check('发过通知与否，状态文案完全一样', async () => {
+  const a = boot(Object.assign({}, okReply, { lastPushAt: 0 }));
   await new Promise(r => setTimeout(r, 1700));
-  const msg = String(getEl('ntMsg').textContent);
-  assert(/最近通知 \d{1,2}:\d{2}/.test(msg), '应给出最近一次通知时刻：' + msg);
-  assert(!/尚未推送|尚无通知/.test(msg), '已发过通知就不该再说尚无：' + msg);
-  return msg;
+  const msgA = String(a.getEl('ntMsg').textContent);
+  const b = boot(Object.assign({}, okReply, { lastPushAt: Date.now() - 60000 }));
+  await new Promise(r => setTimeout(r, 1700));
+  const msgB = String(b.getEl('ntMsg').textContent);
+  assert(msgA === msgB, '两者应当一致：' + msgA + ' vs ' + msgB);
+  return msgA;
+});
+
+await check('本地数据与上次同步一致时，进入页面不发任何请求', async () => {
+  // 这是用户实际观察到的：刷新页面不该白发一次"无改动"的同步
+  const synced = JSON.stringify([{ id: 'a', name: '源矿', remark: '', region: 'wuling', prod: 1, cons: 0, stock: 100, ts: 1780000000000 }]);
+  const { sent } = boot(okReply, [['endfield_synced_rows_v1', synced]], synced);
+  await new Promise(r => setTimeout(r, 1700));
+  assert(sent().length === 0, '无改动仍然发了 ' + sent().length + ' 次请求');
+  return '0 次请求';
+});
+
+await check('本地有未同步的改动时，进入页面补发一次', async () => {
+  const row = (ts) => JSON.stringify([{ id: 'a', name: '源矿', remark: '', region: 'wuling', prod: 1, cons: 0, stock: 100, ts: ts }]);
+  // 快照里是旧锚点，本地已经改过（ts 不同）→ 应补发
+  const { sent } = boot(okReply, [['endfield_synced_rows_v1', row(1780000000000)]], row(1780000900000));
+  await new Promise(r => setTimeout(r, 1700));
+  assert(sent().length === 1, '应补发一次，实际 ' + sent().length);
+  assert(sent()[0].dirty === true, '补发时应带 dirty=true');
+  return '1 次请求，dirty=true';
 });
 
 console.log('\nC. 手动「立即同步」不受自动优化约束');
 
-await check('自动同步在无改动时标注"未写入"', async () => {
-  const { getEl } = boot(Object.assign({}, okReply, { writes: 0 }));
-  await new Promise(r => setTimeout(r, 1700));   // 等进入页面时那次自动同步
-  const msg = String(getEl('ntMsg').textContent);
-  assert(/未写入/.test(msg), '未说明没有写入：' + msg);
-  return msg;
-});
-
-await check('手动「立即同步」强制推送：dirty=true 且不再说"未写入"', async () => {
+await check('手动「立即同步」强制推送：dirty=true', async () => {
   const { getEl, sent } = boot(Object.assign({}, okReply, { writes: 0 }));
   await new Promise(r => setTimeout(r, 1700));
   const before = sent().length;
@@ -258,8 +273,6 @@ await check('手动「立即同步」强制推送：dirty=true 且不再说"未�
   const all = sent();
   assert(all.length > before, '手动同步没有发出请求');
   assert(all[all.length - 1].dirty === true, '手动同步的 dirty = ' + all[all.length - 1].dirty);
-  const msg = String(getEl('ntMsg').textContent);
-  assert(!/未写入/.test(msg), '手动同步不该说"未写入"：' + msg);
   return 'dirty=true，已推送 ' + all[all.length - 1].rows.length + ' 行';
 });
 

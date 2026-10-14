@@ -656,7 +656,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.15.3</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.16.0</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -670,7 +670,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.15.3';
+  const PAGE_VERSION = '1.16.0';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -682,9 +682,28 @@
 
   /* 通知模块：在文件后段赋值（paintStats 会在启动阶段先跑到，所以这里必须提前声明） */
   let notify = null;
-  /* 自上次同步以来本地数据是否被改过。false 时前端只做"心跳"，Worker 不写任何键 —— 
+
+  /* 自上次同步以来本地数据是否真的被改过。
+     只用来回答"这次要不要发同步"：false 时连请求都不发，更不会让 Worker 写任何键。
      KV 免费版每天只有 1000 次写，靠这个把消耗压低一个数量级。 */
-  var dataDirty = true;
+  var dataDirty = false;
+
+  /* 上次同步成功时数据的快照（只含时间锚点字段）。
+     用"当前内容 vs 快照"判断有没有真改动，而不是靠"save() 被调用过"——
+     后者会让 render() 里的 save() 也把状态标脏，刷新一次页面就白发一次同步。 */
+  const SYNC_SNAP_KEY = 'endfield_synced_rows_v1';
+  var syncedSnapshot = '';
+  try { syncedSnapshot = localStorage.getItem(SYNC_SNAP_KEY) || ''; } catch (e) { syncedSnapshot = ''; }
+
+  /** 同步用的行指纹：只取锚点字段，不含每秒都在变的推算存量 */
+  function rowsSnapshot() {
+    return JSON.stringify(rows.map(function (r) {
+      return {
+        id: r.id, name: r.name, remark: r.remark || '', region: r.region,
+        prod: r.prod, cons: r.cons, stock: r.stock, ts: r.ts
+      };
+    }));
+  }
 
   /* ================= 物品列表（来自 items.js） ================= */
   const FALLBACK_ITEMS = ['源石碎片', '碳素结晶', '精密零件'];
@@ -731,6 +750,11 @@
       r.name = ITEMS[0];
     }
   });
+
+  // 规范化之后立刻算一次"本地数据是否与上次同步一致"。
+  // save() 会按内容比对并据此设置 dataDirty —— 不先算这一次，
+  // 启动时的 dataDirty 就一直是初值 false，上个会话没同步出去的改动会被漏掉。
+  save();
 
   // 老数据迁移：只看不改也要落盘，否则数据会永远停在 v1 键上
   if (migratedFromLegacy) save();
@@ -791,7 +815,8 @@
   }
 
   function save() {
-    dataDirty = true;      // 有任何改动，下次同步就必须把数据推上去
+    // 按内容判断有没有真改动：save() 也被 render() 调用，不能一律标脏
+    dataDirty = rowsSnapshot() !== syncedSnapshot;
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(rows));
       if (migratedFromLegacy) {
@@ -1486,7 +1511,10 @@
         return;
       }
 
-      dataDirty = false;    // 本轮数据已经交给 Worker
+      // 本轮数据已经交给 Worker：记下快照，之后只有内容又变了才会再发同步
+      dataDirty = false;
+      syncedSnapshot = rowsSnapshot();
+      try { localStorage.setItem(SYNC_SNAP_KEY, syncedSnapshot); } catch (e) { /* 忽略 */ }
       lastPushAt = Number(data.lastPushAt) || 0;
 
       // 版本对不上 → 多半是改了 worker.js 却没在 Cloudflare 重新部署。
@@ -1528,14 +1556,10 @@
           ? (claimingRecently
             ? '（正在清理 ' + foreign + ' 条旧数据）'
             : '（另有 ' + foreign + ' 条别处数据待接管）')
-          : (num(data.writes, 0) === 0 && !forced ? '（无改动，未写入）' : '');
-        /* 必须把"数据同步"和"通知推送"两件事分清楚：
-           前半句是本轮同步结果，后半句只表示"有没有发出过告警"。
-           原先写成"尚未推送"，容易被读成同步没成功，其实只是在说还没到过预警阈值。 */
-        setStatus('ok', '已同步 ' + data.rows + ' 条 · '
-          + (lastPushAt
-            ? ('最近通知 ' + new Date(lastPushAt).toLocaleTimeString('zh-CN'))
-            : '尚无通知（未到预警阈值）') + tail);
+          : '';
+        /* 这里只说"数据同步"这一件事。
+           有没有发出过告警是另一回事，不属于同步状态，早先混在一起会让人读成自相矛盾。 */
+        setStatus('ok', '已同步 ' + data.rows + ' 条' + tail);
       }
     }
 
@@ -1843,12 +1867,12 @@
         : (cfg.on ? (ready() ? '等待首次同步…' : '未填写 Worker 地址或同步令牌') : '未开启 · 数据只保存在本机')
     );
 
-    // 没有心跳定时器：挂机时不发任何请求。
-    // 同步只在这些时刻发生：进入页面（仅当确有数据且未只读时一次）、
-    // 确认修改退出编辑态、改动通知设置、点了「立即同步 / 接管 / 测试」。
-    // 进入页面时补一次：让新页面认领数据源、并发现"Worker 上有别人的数据"。
-    // 只读、或本地本来就没有数据（纯新建）时不发，避免制造上面那种空快照事故。
-    if (enabled() && !readOnly && rows.length) scheduleSync(1500);
+    // 没有心跳定时器：挂机时不发任何请求，也不做"无改动"的同步。
+    // 同步只在这些时刻发生：本地数据与上次同步不一致时进入页面一次、
+    // 确认修改退出编辑态、删除条目、改动通知设置、点了「立即同步 / 接管 / 测试」。
+    // dataDirty 由 save() 按内容比对得出，所以刷新页面不会白发一次同步；
+    // 只读、或本地本来就没有数据（纯新建）时也不发，避免制造空快照事故。
+    if (enabled() && !readOnly && rows.length && dataDirty) scheduleSync(1500);
 
     window.addEventListener('pagehide', beacon);
 

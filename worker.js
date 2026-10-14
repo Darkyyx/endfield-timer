@@ -16,7 +16,7 @@
 /* Worker 版本号。页面会拿它和自身版本比对，不一致就提示"该重新部署 Worker 了" —— 
    否则改了 worker.js 却忘了部署，会表现为"功能不生效"且毫无线索。
    发新版时与 index.html 页脚的版本号保持一致。 */
-const WORKER_VERSION = '1.15.3';
+const WORKER_VERSION = '1.16.0';
 
 const DEFAULTS = {
   // 推送到某个产线达到上限/下限前多少秒开始预警
