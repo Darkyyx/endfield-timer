@@ -89,8 +89,9 @@
     color:var(--txt);font-weight:600;font-size:15px;
     letter-spacing:.02em;margin:0 2px;
   }
-  .stats .soon b{color:var(--green-bright)}
-  .stats .drain b{color:var(--red)}
+  .stats .ok b{color:#c3ccd4}
+  .stats .warn b{color:var(--yellow)}
+  .stats .danger b{color:var(--red)}
 
   /* ============ 面板 ============ */
   .panel{
@@ -583,7 +584,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.8.1</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.9.0</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -597,7 +598,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.8.1';
+  const PAGE_VERSION = '1.9.0';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1780,25 +1781,28 @@
     }
   }
 
-  /** 预警窗口秒数：以设置面板里的「预警提前量」为准，与 Worker 用的是同一个值 */
-  function warnSeconds() {
-    const m = notify && notify.warnMinutes ? notify.warnMinutes() : 0;
-    return (m > 0 ? m : 30) * 60;
-  }
-
+  /**
+   * 右上角统计：按产线状态计数，而不是统计"多少分钟内会爆仓/耗尽"。
+   * 预警窗口秒数仍以设置面板的「预警提前量」为准，与 Worker 判定用的是同一个值。
+   */
   function paintStats() {
-    const win = warnSeconds();          // 跟随设置，不再写死 1 小时
-    const mins = Math.round(win / 60);
-    let soon = 0, drain = 0;
+    const m = notify && notify.warnMinutes ? notify.warnMinutes() : 0;
+    const win = (m > 0 ? m : 30) * 60;
+
+    let normal = 0, warn = 0, danger = 0;
     rows.forEach(function (r) {
       const c = compute(r);
-      if (c.state === 'filling' && c.seconds < win) soon++;
-      if (c.state === 'draining' && c.seconds < win) drain++;
+      if (c.state === 'full' || c.state === 'empty') danger++;
+      else if (c.state === 'filling' || c.state === 'draining') {
+        if (c.seconds < win) warn++; else normal++;
+      } else normal++;              // 产销平衡算正常
     });
+
     statsEl.innerHTML =
       '<span><span class="k">产物</span><b>' + rows.length + '</b></span>' +
-      '<span class="soon"><span class="k">' + mins + '分钟内爆仓</span><b>' + soon + '</b></span>' +
-      '<span class="drain"><span class="k">' + mins + '分钟内耗尽</span><b>' + drain + '</b></span>' +
+      '<span class="ok"><span class="k">正常</span><b>' + normal + '</b></span>' +
+      '<span class="warn"><span class="k">预警</span><b>' + warn + '</b></span>' +
+      '<span class="danger"><span class="k">危险</span><b>' + danger + '</b></span>' +
       (notify ? notify.hudHtml() : '');
   }
 

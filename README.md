@@ -104,13 +104,14 @@ curl -X POST "https://<你的 Worker>/claim?token=<CLAIM_TOKEN>" \
 ### 本地跑自测
 
 ```bash
-node worker.test.mjs          # 等级判定、去抖、聚合消息、推送重试、SendKey 解析 UID、方向开关、鉴权
+node worker.test.mjs          # 等级判定、去抖、消息文案、推送重试、SendKey 解析 UID、方向开关、鉴权
 node worker.owner.test.mjs    # 数据源归属、换域名导入流程、只读态
 node worker.quota.test.mjs    # KV 每日写入额度预算（防止再把额度写爆）
 node worker.quota-ui.test.mjs # 额度用尽时的状态上报与页面红灯
+node worker.hud.test.mjs      # 右上角状态计数、同步灯与文案
 ```
 
-四个脚本都不需要任何依赖。
+五个脚本都不需要任何依赖。
 
 ---
 
