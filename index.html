@@ -462,7 +462,25 @@
   .ntGrid input[type=text]:focus,.ntGrid input[type=number]:focus{
     border-color:var(--yellow);background:rgba(255,210,30,.06);
   }
+  .ntGrid input[type=text]:disabled{opacity:.55;cursor:not-allowed}
   .ntGrid input::placeholder{color:#3d454e}
+
+  /* 字体优先级下拉框与其左侧的 × 按钮 */
+  .ntGrid select{
+    width:100%;font:inherit;font-size:14px;color:var(--txt);
+    background-color:rgba(255,255,255,.03);border:1px solid var(--line);
+    padding:9px 28px 9px 11px;outline:none;border-radius:0;cursor:pointer;
+    font-family:var(--mono-user);transition:border-color .15s ease;
+    appearance:none;-webkit-appearance:none;
+    background-image:
+      linear-gradient(45deg,transparent 50%,var(--dim) 50%),
+      linear-gradient(135deg,var(--dim) 50%,transparent 50%);
+    background-repeat:no-repeat;
+    background-position:calc(100% - 15px) 54%, calc(100% - 9px) 54%;
+    background-size:6px 6px,6px 6px;
+  }
+  .ntGrid select:focus{border-color:var(--yellow);background-color:rgba(255,210,30,.06)}
+  .ntGrid select option{background:#12161a;color:var(--txt)}
 
   .ntToggles{display:flex;flex-wrap:wrap;gap:10px 26px}
   .ntChk{
@@ -555,6 +573,14 @@
           <span class="k">英文字体</span>
           <input type="text" id="fnEn" placeholder="使用默认" autocomplete="off" spellcheck="false">
         </label>
+        <label>
+          <span class="k">字体优先级</span>
+          <select class="inp sel" id="fnPriority">
+            <option value="en">英文字体优先</option>
+            <option value="zh">中文字体优先</option>
+          </select>
+          <span class="tip">中文字体若自带拉丁字形（如微软雅黑、Maple Mono），会影响英文与数字的显示</span>
+        </label>
       </div>
       <div class="ntActions">
         <span class="ntMsg">未填写则使用默认字体 · 只保存在本机，不同步到 Worker</span>
@@ -613,7 +639,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.10.2</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.11.0</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -627,7 +653,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.10.2';
+  const PAGE_VERSION = '1.11.0';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1838,10 +1864,11 @@
       const o = JSON.parse(localStorage.getItem(FONT_KEY) || 'null');
       return {
         en: o && typeof o.en === 'string' ? o.en : '',
-        zh: o && typeof o.zh === 'string' ? o.zh : ''
+        zh: o && typeof o.zh === 'string' ? o.zh : '',
+        priority: o && o.priority === 'zh' ? 'zh' : 'en'    // 默认英文字体优先
       };
     } catch (e) {
-      return { en: '', zh: '' };
+      return { en: '', zh: '', priority: 'en' };
     }
   }
 
@@ -1852,28 +1879,47 @@
     const en = quoteFamily(cfg.en) || DEFAULT_LATIN;
     root.style.setProperty('--font-zh', zh);
     root.style.setProperty('--font-en', en);
-    // 数字区域：优先用户填的字体，都没填时回落到原来的等宽默认，保持原观感
-    const custom = quoteFamily(cfg.zh) || quoteFamily(cfg.en);
-    root.style.setProperty('--mono-user', custom ? custom + ',' + DEFAULT_MONO : DEFAULT_MONO);
+
+    /* 顺序决定谁接管拉丁字符。
+       中文字体多半自带拉丁字形（微软雅黑、宋体、Maple Mono 都是），
+       所以"中文在前"时英文/数字会被中文字体吃掉，英文设置形同失效；
+       反过来"英文在前"时，不含中文的拉丁字体对汉字是透明的，中文会正常落到中文字体。
+       注意：自定义字体栈里只放用户真正填了的字体，不要掺默认字体，
+       否则默认拉丁栈会挤在中文字体前面，让"中文优先"失去意义。 */
+    const zhFirst = cfg.priority === 'zh';
+    const customZh = quoteFamily(cfg.zh);
+    const customEn = quoteFamily(cfg.en);
+    const picked = zhFirst ? [customZh, customEn] : [customEn, customZh];
+    const pickedList = picked.filter(Boolean).join(',');
+
+    root.style.setProperty('--mono-user', pickedList ? pickedList + ',' + DEFAULT_MONO : DEFAULT_MONO);
+    root.style.setProperty('--font-body',
+      pickedList ? pickedList + ',sans-serif' : DEFAULT_LATIN + ',' + DEFAULT_ZH + ',sans-serif');
   }
 
   (function initFonts() {
     const zhEl = document.getElementById('fnZh');
     const enEl = document.getElementById('fnEn');
-    const cfg = readFonts();
+    const priEl = document.getElementById('fnPriority');
+    let cfg = readFonts();
     zhEl.value = cfg.zh;
     enEl.value = cfg.en;
+    priEl.value = cfg.priority;
     applyFonts(cfg);
 
-    // 回车或失焦才应用；只写本机 localStorage，不参与 Worker 同步。
-    // 每次只提交"失焦的那个框"，另一个框用已保存的值，避免把没提交的输入带上。
+    function save(next) {
+      cfg = next;
+      applyFonts(cfg);
+      try { localStorage.setItem(FONT_KEY, JSON.stringify(cfg)); } catch (e) { /* 忽略 */ }
+    }
+
+    // 输入框：回车或失焦才应用；每次只提交"失焦的那个框"，另一个框沿用已保存的值，
+    // 避免把还没确认的输入带上。只写本机 localStorage，不参与 Worker 同步。
     function commit(which) {
-      const saved = readFonts();
-      const next = which === 'zh'
-        ? { zh: zhEl.value.trim(), en: saved.en }
-        : { en: enEl.value.trim(), zh: saved.zh };
-      applyFonts(next);
-      try { localStorage.setItem(FONT_KEY, JSON.stringify(next)); } catch (e) { /* 忽略 */ }
+      const cur = readFonts();
+      save(which === 'zh'
+        ? { zh: zhEl.value.trim(), en: cur.en, priority: cur.priority }
+        : { en: enEl.value.trim(), zh: cur.zh, priority: cur.priority });
     }
     zhEl.addEventListener('blur', function () { commit('zh'); });
     enEl.addEventListener('blur', function () { commit('en'); });
@@ -1881,6 +1927,11 @@
       el.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') { e.preventDefault(); el.blur(); }   // blur 会触发 commit
       });
+    });
+    // 下拉框改动即生效
+    priEl.addEventListener('change', function () {
+      const cur = readFonts();
+      save({ zh: cur.zh, en: cur.en, priority: priEl.value === 'zh' ? 'zh' : 'en' });
     });
   })();
 

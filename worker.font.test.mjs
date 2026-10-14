@@ -110,7 +110,9 @@ await check('含空格的字族名自动加引号（不加引号会被 CSS 当�
   getEl('fnZh').value = 'Maple Mono NF CN';
   getEl('fnZh').listeners.blur.forEach(fn => fn());
   assert(cssVars['--font-zh'] === '"Maple Mono NF CN"', '中文未加引号：' + cssVars['--font-zh']);
-  assert((cssVars['--mono-user'] || '').indexOf('"Maple Mono NF CN",') === 0, '数字区未用该字体：' + cssVars['--mono-user']);
+  const mono = cssVars['--mono-user'] || '';
+  assert(mono.indexOf('"Maple Mono NF CN"') >= 0, '数字区未用该字体：' + mono);
+  assert(mono.indexOf('Barlow') < 0, '数字区不该混入默认拉丁字体栈：' + mono);
   return cssVars['--mono-user'];
 });
 
@@ -148,14 +150,51 @@ await check('数字区域已全部改用 --mono-user', () => {
   return uses + ' 处';
 });
 
-await check('中文字体排在英文字体之前（中文字体自带拉丁字形时能接管英文）', () => {
-  const zhIdx = html.indexOf('--font-zh:');
-  const enIdx = html.indexOf('--font-en:');
-  assert(zhIdx > 0 && enIdx > 0, '未找到字体变量');
-  assert(zhIdx < enIdx, '配置顺序应为中文在前');
-  const bodyVar = (html.match(/--font-body:([^;]+);/) || [])[1] || '';
-  assert(bodyVar.indexOf('var(--font-zh)') < bodyVar.indexOf('var(--font-en)'), '--font-body 里中文应在前：' + bodyVar);
-  return '中文在前，英文兜底';
+await check('优先级=英文时：英文字体排在中文字体之前（微软雅黑等不会吃掉 Consolas）', () => {
+  const { getEl, cssVars } = boot([]);
+  getEl('fnZh').value = 'Microsoft YaHei';
+  getEl('fnZh').listeners.blur.forEach(fn => fn());
+  getEl('fnEn').value = 'Consolas';
+  getEl('fnEn').listeners.blur.forEach(fn => fn());
+  getEl('fnPriority').value = 'en';
+  getEl('fnPriority').listeners.change.forEach(fn => fn());
+  const mono = cssVars['--mono-user'] || '';
+  assert(mono.indexOf('Consolas') < mono.indexOf('Microsoft YaHei'), '英文应在前：' + mono);
+  const body = cssVars['--font-body'] || '';
+  assert(body.indexOf('Consolas') < body.indexOf('Microsoft YaHei'), '--font-body 英文应在前：' + body);
+  return mono;
+});
+
+await check('优先级=中文时：中文字体排在最前（Maple Mono 之类可接管英文数字）', () => {
+  const { getEl, cssVars } = boot([]);
+  getEl('fnZh').value = 'Maple Mono NF CN';
+  getEl('fnZh').listeners.blur.forEach(fn => fn());
+  getEl('fnEn').value = 'Consolas';
+  getEl('fnEn').listeners.blur.forEach(fn => fn());
+  getEl('fnPriority').value = 'zh';
+  getEl('fnPriority').listeners.change.forEach(fn => fn());
+  const mono = cssVars['--mono-user'] || '';
+  assert(mono.indexOf('"Maple Mono NF CN"') < mono.indexOf('Consolas'), '中文应在前：' + mono);
+  return mono;
+});
+
+await check('优先级持久化，且非法值回落到英文优先', () => {
+  const { store, getEl } = boot([]);
+  getEl('fnEn').value = 'Consolas';           // 触发一次提交，写入存储
+  getEl('fnEn').listeners.blur.forEach(fn => fn());
+  assert(JSON.parse(store.get('endfield_font_v1')).priority === 'en', '默认应为 en');
+  const restored = boot([], [['endfield_font_v1', JSON.stringify({ zh: 'ZhFont', en: 'EnFont', priority: 'zh' })]]);
+  const mono = restored.cssVars['--mono-user'] || '';
+  assert(mono.indexOf('ZhFont') >= 0 && mono.indexOf('ZhFont') < mono.indexOf('EnFont'), '未恢复中文优先：' + mono);
+  assert(restored.getEl('fnPriority').value === 'zh', '下拉框未回填');
+  return '已持久化并回填';
+});
+
+await check('优先级下拉框存在且有说明文字', () => {
+  assert(/id="fnPriority"/.test(html), '缺少优先级下拉框');
+  assert(/英文字体优先/.test(html) && /中文字体优先/.test(html), '缺少选项文案');
+  assert(/自带拉丁字形/.test(html), '缺少说明文字');
+  return '下拉框 + 说明';
 });
 
 await check('面板文案：DISPLAY / NOTIFICATION，占位符为"使用默认"', () => {
