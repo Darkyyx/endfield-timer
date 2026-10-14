@@ -456,7 +456,9 @@
   .ntPanel[data-state="save"] .sumDot{background:var(--yellow)}
 
   .ntBody{padding:20px;display:flex;flex-direction:column;gap:16px}
-  .ntGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px 20px}
+  .ntGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px 20px}
+  /* 占满整行：地址、令牌这类长输入单独一行，避免被挤窄 */
+  .ntGrid .wide{grid-column:1/-1}
   .ntGrid label{display:block}
   .ntGrid .k{
     display:block;font-size:12.5px;color:var(--dim);
@@ -604,12 +606,12 @@
     <summary><span class="sumDot"></span>通知设置 · NOTIFICATION</summary>
     <div class="ntBody">
       <div class="ntGrid">
-        <label>
+        <label class="wide">
           <span class="k">Worker 地址</span>
           <input type="text" id="ntUrl" placeholder="https://xxx.workers.dev" autocomplete="off" spellcheck="false">
           <span class="tip">在 Cloudflare 部署的 Worker 地址</span>
         </label>
-        <label>
+        <label class="wide">
           <span class="k">同步令牌</span>
           <input type="text" id="ntToken" placeholder="与 Worker 的 SYNC_TOKEN 一致" autocomplete="off" spellcheck="false">
           <span class="tip">防止未经授权的访问</span>
@@ -620,21 +622,14 @@
           <span class="tip">即将爆仓或耗尽时提醒</span>
         </label>
         <label>
-          <span class="k">时区</span>
-          <select class="inp sel" id="ntTz">
-            <option value="8">UTC+8　北京 / 新加坡</option>
-            <option value="9">UTC+9　东京 / 首尔</option>
-            <option value="7">UTC+7　曼谷 / 雅加达</option>
-            <option value="5.5">UTC+5:30　新德里</option>
-            <option value="4">UTC+4　迪拜</option>
-            <option value="1">UTC+1　柏林 / 巴黎</option>
-            <option value="0">UTC+0　伦敦</option>
-            <option value="-3">UTC-3　圣保罗</option>
-            <option value="-5">UTC-5　纽约</option>
-            <option value="-7">UTC-7　丹佛</option>
-            <option value="-8">UTC-8　洛杉矶</option>
-          </select>
+          <span class="k">地区</span>
+          <select class="inp sel" id="ntTzRegion"></select>
           <span class="tip">通知里预计时间所用的时区</span>
+        </label>
+        <label>
+          <span class="k">城市</span>
+          <select class="inp sel" id="ntTzCity"></select>
+          <span class="tip">&nbsp;</span>
         </label>
       </div>
 
@@ -668,7 +663,7 @@
   </div>
 
   <!-- 版本号：功能新增进 minor，仅修复进 patch；改完记得同步这里 -->
-  <div class="foot">终末地 // 集成工业系统 // <b>v1.12.0</b></div>
+  <div class="foot">终末地 // 集成工业系统 // <b>v1.13.0</b></div>
 </div>
 
 <!-- 物品配置（放在主脚本之前） -->
@@ -682,7 +677,7 @@
   const STORE_KEY = 'endfield_line_timer_v2';
   const STORE_KEY_LEGACY = 'endfield_line_timer_v1';   // 老数据迁移用
   /* 页面版本。Worker 会在 /sync 响应里回自己的版本，两者不一致就提示重新部署 */
-  const PAGE_VERSION = '1.12.0';
+  const PAGE_VERSION = '1.13.0';
   const LIMITS = { gudi: 80000, wuling: 90000 };
   const ICON_DIR = 'items/';
   const ICON_EXT = '.png';
@@ -1238,7 +1233,8 @@
     const urlEl = $('ntUrl');
     const tokenEl = $('ntToken');
     const warnEl = $('ntWarn');
-    const tzEl = $('ntTz');
+    const regionEl = $('ntTzRegion');
+    const cityEl = $('ntTzCity');
     const onEl = $('ntOn');
     const fullEl = $('ntWarnFull');
     const emptyEl = $('ntWarnEmpty');
@@ -1260,6 +1256,126 @@
     let quotaAt = 0;          // KV 额度用尽的时间（0 = 正常）
     let readOnly = false;     // 用户选了"不导入"，本页面保持只读
     let claiming = false;
+
+    /* ---------- 时区：两级下拉（地区 → 城市），值是 IANA 标识符 ---------- */
+    const TZ_DEFAULT = 'Asia/Shanghai';
+    /* 常用城市给中文名，好认；其余从浏览器支持的时区里补全，
+       保证列表里出现的每一项都能被 Intl 解析（不同浏览器 ICU 版本可能缺少个别城市）。 */
+    const TZ_CURATED = {
+      Asia: [
+        ['上海', 'Asia/Shanghai'], ['香港', 'Asia/Hong_Kong'], ['台北', 'Asia/Taipei'],
+        ['东京', 'Asia/Tokyo'], ['首尔', 'Asia/Seoul'], ['新加坡', 'Asia/Singapore'],
+        ['曼谷', 'Asia/Bangkok'], ['雅加达', 'Asia/Jakarta'], ['马尼拉', 'Asia/Manila'],
+        ['河内', 'Asia/Ho_Chi_Minh'], ['吉隆坡', 'Asia/Kuala_Lumpur'], ['仰光', 'Asia/Yangon'],
+        ['迪拜', 'Asia/Dubai'], ['卡拉奇', 'Asia/Karachi'], ['达卡', 'Asia/Dhaka'],
+        ['新德里', 'Asia/Kolkata'], ['加德满都', 'Asia/Kathmandu'], ['塔什干', 'Asia/Tashkent'],
+        ['阿拉木图', 'Asia/Almaty'], ['德黑兰', 'Asia/Tehran'], ['巴格达', 'Asia/Baghdad'],
+        ['利雅得', 'Asia/Riyadh'], ['伊斯坦布尔', 'Europe/Istanbul'], ['叶卡捷琳堡', 'Asia/Yekaterinburg'],
+        ['新西伯利亚', 'Asia/Novosibirsk'], ['伊尔库茨克', 'Asia/Irkutsk'],
+        ['雅库茨克', 'Asia/Yakutsk'], ['符拉迪沃斯托克', 'Asia/Vladivostok'],
+        ['马加丹', 'Asia/Magadan'], ['堪察加', 'Asia/Kamchatka']
+      ],
+      Europe: [
+        ['伦敦', 'Europe/London'], ['都柏林', 'Europe/Dublin'], ['里斯本', 'Europe/Lisbon'],
+        ['巴黎', 'Europe/Paris'], ['柏林', 'Europe/Berlin'], ['罗马', 'Europe/Rome'],
+        ['马德里', 'Europe/Madrid'], ['阿姆斯特丹', 'Europe/Amsterdam'], ['布鲁塞尔', 'Europe/Brussels'],
+        ['维也纳', 'Europe/Vienna'], ['布拉格', 'Europe/Prague'], ['华沙', 'Europe/Warsaw'],
+        ['斯德哥尔摩', 'Europe/Stockholm'], ['奥斯陆', 'Europe/Oslo'], ['哥本哈根', 'Europe/Copenhagen'],
+        ['赫尔辛基', 'Europe/Helsinki'], ['雅典', 'Europe/Athens'], ['布加勒斯特', 'Europe/Bucharest'],
+        ['基辅', 'Europe/Kyiv'], ['莫斯科', 'Europe/Moscow'], ['明斯克', 'Europe/Minsk']
+      ],
+      America: [
+        ['纽约', 'America/New_York'], ['多伦多', 'America/Toronto'], ['芝加哥', 'America/Chicago'],
+        ['墨西哥城', 'America/Mexico_City'], ['丹佛', 'America/Denver'], ['菲尼克斯', 'America/Phoenix'],
+        ['洛杉矶', 'America/Los_Angeles'], ['温哥华', 'America/Vancouver'],
+        ['安克雷奇', 'America/Anchorage'], ['檀香山', 'Pacific/Honolulu'],
+        ['圣保罗', 'America/Sao_Paulo'], ['布宜诺斯艾利斯', 'America/Argentina/Buenos_Aires'],
+        ['圣地亚哥', 'America/Santiago'], ['利马', 'America/Lima'], ['波哥大', 'America/Bogota'],
+        ['巴拿马', 'America/Panama'], ['哈瓦那', 'America/Havana']
+      ],
+      Oceania: [
+        ['悉尼', 'Australia/Sydney'], ['墨尔本', 'Australia/Melbourne'], ['布里斯班', 'Australia/Brisbane'],
+        ['珀斯', 'Australia/Perth'], ['阿德莱德', 'Australia/Adelaide'], ['达尔文', 'Australia/Darwin'],
+        ['奥克兰', 'Pacific/Auckland'], ['斐济', 'Pacific/Fiji'], ['关岛', 'Pacific/Guam'],
+        ['莫尔兹比港', 'Pacific/Port_Moresby'], ['塔拉瓦', 'Pacific/Tarawa'],
+        ['汤加', 'Pacific/Tongatapu'], ['基里蒂马蒂', 'Pacific/Kiritimati']
+      ],
+      Africa: [
+        ['开罗', 'Africa/Cairo'], ['约翰内斯堡', 'Africa/Johannesburg'], ['拉各斯', 'Africa/Lagos'],
+        ['内罗毕', 'Africa/Nairobi'], ['卡萨布兰卡', 'Africa/Casablanca'], ['阿尔及尔', 'Africa/Algiers'],
+        ['突尼斯', 'Africa/Tunis'], ['亚的斯亚贝巴', 'Africa/Addis_Ababa'], ['达喀尔', 'Africa/Dakar']
+      ],
+      UTC: [['协调世界时', 'UTC']]
+    };
+    /* 中文名可能用不上时（ICU 里叫别名），补一份 IANA 原名做后备 */
+    const TZ_ALIAS = {
+      'Asia/Kolkata': ['Asia/Calcutta'],
+      'Asia/Kathmandu': ['Asia/Katmandu'],
+      'Asia/Yangon': ['Asia/Rangoon'],
+      'Asia/Ho_Chi_Minh': ['Asia/Saigon'],
+      'Europe/Kyiv': ['Europe/Kiev'],
+      'America/Argentina/Buenos_Aires': ['America/Buenos_Aires']
+    };
+
+    let tzIndex = null;    // { 'Asia/Shanghai': { region, city, label } }
+
+    function tzUsable(id) {
+      try { new Intl.DateTimeFormat('en-US', { timeZone: id }).format(new Date()); return true; }
+      catch (e) { return false; }
+    }
+    function tzPick(id) {
+      if (tzUsable(id)) return id;
+      const alts = TZ_ALIAS[id] || [];
+      for (let i = 0; i < alts.length; i++) if (tzUsable(alts[i])) return alts[i];
+      return '';
+    }
+
+    /* 列出所有可用城市。精选之外用浏览器支持的时区补齐，
+       否则会出现"列表里没有我所在的城市"。 */
+    function tzCatalogue() {
+      const out = {};
+      Object.keys(TZ_CURATED).forEach(function (region) {
+        out[region] = [];
+        TZ_CURATED[region].forEach(function (pair) {
+          const usable = tzPick(pair[1]);
+          if (usable) out[region].push({ label: pair[0], id: usable });
+        });
+      });
+
+      let supported = [];
+      try { supported = Intl.supportedValuesOf('timeZone') || []; } catch (e) { supported = []; }
+      const known = {};
+      Object.keys(out).forEach(function (r) { out[r].forEach(function (c) { known[c.id] = 1; }); });
+      /* Australia / Pacific 已被"大洋洲"覆盖，再单列会和精选城市重复；
+         巴西/阿根廷那些三段式时区归到美洲，避免多出奇怪的一级地区。 */
+      const SKIP_REGION = { Australia: 1, Pacific: 1, Brazil: 1, Argentina: 1, Mexico: 1, Chile: 1, US: 1, Canada: 1, Etc: 1 };
+      supported.forEach(function (id) {
+        if (known[id]) return;
+        if (!/^[A-Za-z]+\/[A-Za-z0-9_+\-]+$/.test(id)) return;
+        const region = id.split('/')[0];
+        if (SKIP_REGION[region]) return;
+        if (!out[region]) out[region] = [];
+        out[region].push({ label: id.split('/')[1].replace(/_/g, ' '), id: id });
+        known[id] = 1;
+      });
+      return out;
+    }
+
+    function buildTzIndex() {
+      const cat = tzCatalogue();
+      const idx = {};
+      Object.keys(cat).forEach(function (region) {
+        cat[region].forEach(function (c) { idx[c.id] = { region: region, label: c.label }; });
+      });
+      return { cat: cat, idx: idx };
+    }
+
+    function tzRegionOf(id) {
+      if (!tzIndex) return 'Asia';
+      const hit = tzIndex.idx[id];
+      if (hit) return hit.region;
+      return tzIndex.cat[id.split('/')[0]] ? id.split('/')[0] : 'Asia';
+    }
 
     /**
      * 补全协议。用户常常只填 "xxx.workers.dev" 而漏掉 https://，
@@ -1286,9 +1402,9 @@
         on: !!c.on,
         warnFull: typeof c.warnFull === 'boolean' ? c.warnFull : true,
         warnEmpty: typeof c.warnEmpty === 'boolean' ? c.warnEmpty : legacyEmpty,
-        // 通知里预计时间所用的时区（小时偏移）。默认 +8（北京时间）。
-        tz: Number.isFinite(Number(c.tz)) && Number(c.tz) >= -12 && Number(c.tz) <= 14
-          ? Number(c.tz) : 8
+        // 通知里预计时间所用的时区（IANA 标识符，如 Asia/Shanghai）。默认上海。
+        zone: typeof c.zone === 'string' && /^[A-Za-z]+\/[A-Za-z0-9_+\-]+$/.test(c.zone)
+          ? c.zone : (c.zone === 'UTC' ? 'UTC' : TZ_DEFAULT)
       };
     }
 
@@ -1321,16 +1437,47 @@
        不能因为"这次请求本身成功"就显示绿灯。 */
     /**
      * 额度重置时刻文案。Cloudflare 按 **UTC 零点** 重置额度，本地钟点取决于所选时区：
-     * UTC+8 → 8:00，UTC+9 → 9:00，UTC-5 → 前一天 19:00。
+     * Asia/Shanghai → 8:00，Asia/Tokyo → 9:00，America/New_York → 前一天 20:00。
      * /sync 响应里带 quotaReset 时优先用它（Worker 是权威，避免两边算法漂移）。
      */
     let serverQuotaReset = '';
+
+    /** 某个时刻在指定时区的 UTC 偏移（小时，含夏令时）——与 Worker 的 zoneOffsetHours 同算法 */
+    function zoneOffset(ms, zone) {
+      try {
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: zone, timeZoneName: 'longOffset'
+        }).formatToParts(new Date(ms));
+        const name = (parts.find(function (p) { return p.type === 'timeZoneName'; }) || {}).value || '';
+        const m = name.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
+        if (m) {
+          const v = Number(m[2]) + (m[3] ? Number(m[3]) / 60 : 0);
+          return m[1] === '-' ? -v : v;
+        }
+        if (/GMT/.test(name)) return 0;
+      } catch (e) { /* 落到下面的日历算法 */ }
+      try {
+        const p = new Intl.DateTimeFormat('en-US', {
+          timeZone: zone, hour: '2-digit', minute: '2-digit', hour12: false
+        }).formatToParts(new Date(ms));
+        const g = function (t) { return Number((p.find(function (x) { return x.type === t; }) || {}).value); };
+        const h = g('hour') % 24;
+        return Math.round((h * 60 + g('minute') - (new Date(ms).getUTCHours() * 60 + new Date(ms).getUTCMinutes())) / 60 * 2) / 2;
+      } catch (e) {
+        return 8;
+      }
+    }
+
     function quotaResetHint() {
       if (serverQuotaReset) return serverQuotaReset;
-      const h = ((24 + cfg.tz) % 24 + 24) % 24;
+      // 下一个 UTC 零点就是重置时刻，用它的偏移算本地钟点
+      const now = Date.now();
+      const at = (Math.floor(now / 86400000) + 1) * 86400000;
+      const o = zoneOffset(at, cfg.zone);
+      const h = ((24 + o) % 24 + 24) % 24;
       const hh = Math.floor(h);
       const mm = Math.round((h - hh) * 60);
-      return (cfg.tz >= 0 ? '每天 ' : '每天（前一天）')
+      return (o >= 0 ? '每天 ' : '每天（前一天）')
         + hh + ':' + String(mm).padStart(2, '0') + ' 点重置';
     }
 
@@ -1425,7 +1572,7 @@
         quotaAt: quotaAt || 0,      // 回显给 Worker：额度用尽时它自己写不进 KV，只能靠页面记着
         warnMinutes: cfg.warn,
         alertTypes: alertTypes(),
-        timeZone: cfg.tz,
+        timeZone: cfg.zone,
         rows: list
       };
       return JSON.stringify(extra ? Object.assign(body, extra) : body);
@@ -1468,7 +1615,7 @@
         return;
       }
 
-      // Worker 是重置时刻文案的权威（它知道 KV 的真实时区配置）；拿不到就本地按 cfg.tz 推算
+      // Worker 是重置时刻文案的权威（它知道 KV 的真实时区配置）；拿不到就本地按 cfg.zone 推算
       serverQuotaReset = typeof data.quotaReset === 'string' ? data.quotaReset : '';
 
       // KV 额度：只在"确实没写成功"或"本次探测确认仍不足"时才置位；
@@ -1700,8 +1847,7 @@
       cfg.on = !!onEl.checked;
       cfg.warnFull = !!fullEl.checked;
       cfg.warnEmpty = !!emptyEl.checked;
-      const tz = Number(tzEl.value);
-      cfg.tz = (Number.isFinite(tz) && tz >= -12 && tz <= 14) ? tz : 8;
+      if (cityEl.value) cfg.zone = cityEl.value;      // 两级下拉的最终值就是 IANA 标识符
       // 时区变了，本地推算的额度重置文案要作废，改用新时区重算
       serverQuotaReset = '';
       // 把补全后的地址回填到输入框，让用户看到实际会请求到哪里
@@ -1731,12 +1877,28 @@
       });
     });
 
-    [onEl, fullEl, emptyEl, tzEl].forEach(function (el) {
+    // 地区变了 → 重填城市列表（保留本地区内的选择，否则取第一个）
+    regionEl.addEventListener('change', function () {
+      fillCities(regionEl.value, '');
+      refreshCfg();
+      if (!cfg.on) { setStatus('off', '未开启 · 数据只保存在本机'); return; }
+      if (!ready()) { setStatus('err', '未填写 Worker 地址或同步令牌'); return; }
+      scheduleSync(200);
+    });
+
+    cityEl.addEventListener('change', function () {
+      refreshCfg();
+      if (!cfg.on) { clearTimeout(syncTimer); setStatus('off', '未开启 · 数据只保存在本机'); return; }
+      if (!ready()) { setStatus('err', '未填写 Worker 地址或同步令牌'); return; }
+      scheduleSync(200);   // 时区变了，把设置同步给 Worker
+    });
+
+    [onEl, fullEl, emptyEl].forEach(function (el) {
       el.addEventListener('change', function () {
         refreshCfg();
         if (!cfg.on) { clearTimeout(syncTimer); setStatus('off', '未开启 · 数据只保存在本机'); return; }
         if (!ready()) { setStatus('err', '未填写 Worker 地址或同步令牌'); return; }
-        scheduleSync(200);   // 提醒方向或时区变了，把设置同步给 Worker
+        scheduleSync(200);   // 提醒方向变了，把设置同步给 Worker
       });
     });
 
@@ -1784,11 +1946,38 @@
         .catch(function (e) { setStatus('err', '无法连接 Worker：' + (e && e.message ? e.message : e)); });
     });
 
+    /* ---- 时区两级下拉 ---- */
+    tzIndex = buildTzIndex();
+    const tzRegions = Object.keys(tzIndex.cat);
+
+    function fillCities(region, want) {
+      const list = tzIndex.cat[region] || [];
+      cityEl.innerHTML = list.map(function (c) {
+        return '<option value="' + c.id + '">' + c.label + '</option>';
+      }).join('');
+      // 目标城市在本地区则选中它，否则退回第一个
+      const has = list.some(function (c) { return c.id === want; });
+      cityEl.value = has ? want : (list[0] ? list[0].id : '');
+    }
+
+    function fillRegions(want) {
+      regionEl.innerHTML = tzRegions.map(function (r) {
+        return '<option value="' + r + '">' + r + '</option>';
+      }).join('');
+      const region = tzRegionOf(want);
+      regionEl.value = tzIndex.cat[region] ? region : (tzRegions[0] || '');
+      fillCities(regionEl.value, want);
+    }
+
+    // 启动前先兜底建一次，保证 cfg.zone 一定是列表里能选中的值
+    cfg.zone = tzIndex.idx[cfg.zone] ? cfg.zone
+      : (cfg.zone === 'UTC' && tzIndex.idx.UTC ? 'UTC' : (tzIndex.idx[TZ_DEFAULT] ? TZ_DEFAULT : cfg.zone));
+
     /* ---- 启动 ---- */
     urlEl.value = cfg.url;
     tokenEl.value = cfg.token;
     warnEl.value = String(cfg.warn);
-    tzEl.value = String(cfg.tz);
+    fillRegions(cfg.zone);
     onEl.checked = cfg.on;
     claimedAt = readClaimTs();
     quotaAt = readQuotaAt();
