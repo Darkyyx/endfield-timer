@@ -626,8 +626,9 @@
 
       <div class="ntToggles">
         <label class="ntChk"><input type="checkbox" id="ntOn">开启通知</label>
-        <label class="ntChk"><input type="checkbox" id="ntWarnFull">爆仓物品</label>
-        <label class="ntChk"><input type="checkbox" id="ntWarnEmpty">耗尽物品</label>
+        <label class="ntChk" title="勾选：本地数据为准，始终上传。取消勾选：从 Worker 拉取数据，本页只读">
+          <input type="checkbox" id="ntLocalFirst">本地数据优先
+        </label>
       </div>
 
       <div class="ntActions">
@@ -1273,10 +1274,7 @@
   notify = (function () {
     const CFG_KEY = 'endfield_notify_v1';
     const CLIENT_KEY = 'endfield_client_v1';       // 本 origin 的身份，用于区分"哪个页面是通知源"
-    const DECLINE_KEY = 'endfield_import_declined'; // 记下"这次不导入"，避免每 60 秒反复问
-    const CLAIM_TS_KEY = 'endfield_claim_at';       // 最近一次接管的时间
     const QUOTA_TS_KEY = 'endfield_quota_at';       // KV 额度用尽的时间（跨刷新保留）
-    const CLAIM_QUIET_MS = 10 * 60 * 1000;          // 接管后这段时间内不再追问导入
 
     const $ = function (id) { return document.getElementById(id); };
     const urlEl = $('ntUrl');
@@ -1284,61 +1282,59 @@
     const warnEl = $('ntWarn');
     const tzEl = $('ntTz');
     const onEl = $('ntOn');
-    const fullEl = $('ntWarnFull');
-    const emptyEl = $('ntWarnEmpty');
+    const localFirstEl = $('ntLocalFirst');
     const testBtn = $('ntTest');
     const nowBtn = $('ntNow');
     const resetBtn = $('ntReset');
-    const claimBtn = $('ntClaim');
     const msgEl = $('ntMsg');
     const panelEl = $('ntPanel');
 
-    let status = 'off';       // off | idle | ok | err | save | blocked
+    let status = 'off';       // off | idle | ok | err | save
     let detail = '未开启 · 数据只保存在本机';
     let lastPushAt = 0;
     let syncTimer = null;
     let wasEditing = false;
-    let blockedOwner = '';    // 当前占着 Worker 的那个页面
-    let foreignRows = 0;      // Worker 里属于别的页面的残留行数
-    let claimedAt = 0;        // 本页面最近一次接管的时间
     let quotaAt = 0;          // KV 额度用尽的时间（0 = 正常）
-    let readOnly = false;     // 用户选了"不导入"，本页面保持只读
-    let claiming = false;
-    let foreignChecked = false;   // 本次会话是否已判定过"要不要问导入"（只判定一次）
-    let pendingLocalRows = 0;     // 加载时本地有几条数据：为空才值得问导入
+    let pulledThisSession = false;  // "从 Worker 拉取"模式下，本会话是否已经拉过
+    let sending = false;            // 是否有请求在途（用于合并密集操作）
+    let queued = false;             // 在途期间又有一次同步请求，等它回来再补一次
+    let rowDirtyAtSync = false;     // 本轮同步是否带着产线改动（决定状态文案）
+    let cfgDirtyAtSync = false;     // 本轮同步是否带着设置改动
+    let cfgDirty = false;           // 设置改过、但还没同步出去
+    let inClaim = false;            // 正处于"接管后立刻上传"那一步（防 409 递归）
 
     /* ---------- 时区：固定 UTC 偏移 ---------- */
     /* 列表从 +14 递减到 -12，每档只放一个最有代表性的城市。
        不处理夏令时：固定偏移实现简单可预测，夏令时期间个别城市会差一小时。 */
     const TZ_DEFAULT = 8;
     const TZ_LIST = [
-      [14, 'UTC+14　基里蒂马蒂'],
-      [13, 'UTC+13　努库阿洛法'],
-      [12, 'UTC+12　苏瓦'],
-      [11, 'UTC+11　努美阿'],
+      [0, 'UTC+0　 伦敦'],
+      [1, 'UTC+1　 巴黎'],
+      [2, 'UTC+2　 雅典'],
+      [3, 'UTC+3　 莫斯科'],
+      [4, 'UTC+4　 迪拜'],
+      [5, 'UTC+5　 卡拉奇'],
+      [6, 'UTC+6　 达卡'],
+      [7, 'UTC+7　 曼谷'],
+      [8, 'UTC+8　 上海'],
+      [9, 'UTC+9　 东京'],
       [10, 'UTC+10　悉尼'],
-      [9, 'UTC+9　东京'],
-      [8, 'UTC+8　上海'],
-      [7, 'UTC+7　曼谷'],
-      [6, 'UTC+6　达卡'],
-      [5, 'UTC+5　卡拉奇'],
-      [4, 'UTC+4　迪拜'],
-      [3, 'UTC+3　莫斯科'],
-      [2, 'UTC+2　雅典'],
-      [1, 'UTC+1　巴黎'],
-      [0, 'UTC+0　伦敦'],
-      [-1, 'UTC-1　亚速尔群岛'],
-      [-2, 'UTC-2　费尔南多'],
-      [-3, 'UTC-3　圣保罗'],
-      [-4, 'UTC-4　圣地亚哥'],
-      [-5, 'UTC-5　纽约'],
-      [-6, 'UTC-6　芝加哥'],
-      [-7, 'UTC-7　丹佛'],
-      [-8, 'UTC-8　洛杉矶'],
-      [-9, 'UTC-9　安克雷奇'],
-      [-10, 'UTC-10　檀香山'],
+      [11, 'UTC+11　所罗门群岛'],
+      [12, 'UTC+12　奥克兰'],
+      [13, 'UTC+13　努库阿洛法'],
+      [14, 'UTC+14　基里蒂马蒂'],
+      [-12, 'UTC-12　贝克岛'],
       [-11, 'UTC-11　帕果帕果'],
-      [-12, 'UTC-12　贝克岛']
+      [-10, 'UTC-10　檀香山'],
+      [-9, 'UTC-9　 安克雷奇'],
+      [-8, 'UTC-8　 洛杉矶'],
+      [-7, 'UTC-7　 丹佛'],
+      [-6, 'UTC-6　 芝加哥'],
+      [-5, 'UTC-5　 纽约'],
+      [-4, 'UTC-4　 圣地亚哥'],
+      [-3, 'UTC-3　 圣保罗'],
+      [-2, 'UTC-2　 费尔南多'],
+      [-1, 'UTC-1　 亚速尔群岛'] 
     ];
     /**
      * 补全协议。用户常常只填 "xxx.workers.dev" 而漏掉 https://，
@@ -1356,15 +1352,14 @@
       let raw = null;
       try { raw = JSON.parse(localStorage.getItem(CFG_KEY) || 'null'); } catch (e) { raw = null; }
       const c = raw && typeof raw === 'object' ? raw : {};
-      // 老配置里只有 warnEmpty（且默认开启），迁移时让爆仓方向保持开启
-      const legacyEmpty = c.warnEmpty !== false;
       return {
         url: normalizeUrl(c.url),
         token: typeof c.token === 'string' ? c.token : '',
         warn: Number.isFinite(Number(c.warn)) && Number(c.warn) > 0 ? Math.floor(Number(c.warn)) : 30,
         on: !!c.on,
-        warnFull: typeof c.warnFull === 'boolean' ? c.warnFull : true,
-        warnEmpty: typeof c.warnEmpty === 'boolean' ? c.warnEmpty : legacyEmpty,
+        // 本地数据优先：勾选时本地数据为准、始终上传；取消勾选时从 Worker 拉取、本页只读。
+        // 默认勾选 —— 单人使用时本地就是唯一数据来源，不该去覆盖它。
+        localFirst: typeof c.localFirst === 'boolean' ? c.localFirst : true,
         // 通知里预计时间所用的时区（小时偏移）。默认 +8（北京时间）。
         tz: Number.isFinite(Number(c.tz)) && Number(c.tz) >= -12 && Number(c.tz) <= 14
           ? Math.round(Number(c.tz) * 2) / 2 : TZ_DEFAULT
@@ -1380,20 +1375,6 @@
         try { localStorage.setItem(CLIENT_KEY, id); } catch (e) { /* 忽略 */ }
       }
       return id;
-    }
-
-    function declinedFor() {
-      try { return localStorage.getItem(DECLINE_KEY) || ''; } catch (e) { return ''; }
-    }
-    function setDeclined(v) {
-      try { v ? localStorage.setItem(DECLINE_KEY, v) : localStorage.removeItem(DECLINE_KEY); } catch (e) { /* 忽略 */ }
-    }
-
-    function readClaimTs() {
-      try { return Number(localStorage.getItem(CLAIM_TS_KEY)) || 0; } catch (e) { return 0; }
-    }
-    function markClaimed() {
-      try { localStorage.setItem(CLAIM_TS_KEY, String(Date.now())); } catch (e) { /* 忽略 */ }
     }
 
     /* KV 额度用尽的状态要跨刷新保留：只读/无改动的请求不写 KV，
@@ -1436,12 +1417,11 @@
     function setStatus(state, text) {
       status = state;
       if (text) detail = text;
-      if (panelEl) panelEl.dataset.state = (state === 'blocked' ? 'err' : state);
+      if (panelEl) panelEl.dataset.state = state;
       if (msgEl) {
         msgEl.textContent = detail;
-        msgEl.className = 'ntMsg' + (state === 'ok' ? ' is-ok' : (state === 'err' || state === 'blocked' ? ' is-err' : ''));
+        msgEl.className = 'ntMsg' + (state === 'ok' ? ' is-ok' : (state === 'err' ? ' is-err' : ''));
       }
-      if (claimBtn) claimBtn.style.display = (state === 'blocked' || readOnly) ? '' : 'none';
       paintStats();
     }
 
@@ -1468,13 +1448,11 @@
         idle: '同步 待发送',
         ok: '同步 正常',
         err: '同步 异常',
-        save: '同步 进行中',
-        blocked: '同步 待确认'
+        save: '同步 进行中'
       }[status] || '同步';
 
       const cls = status === 'save' ? 'is-save'
-        : (status === 'blocked' ? 'is-err'
-          : (status === 'err' ? 'is-err' : (status === 'ok' ? 'is-ok' : 'is-idle')));
+        : (status === 'err' ? 'is-err' : (status === 'ok' ? 'is-ok' : 'is-idle'));
 
       const tip = label + ' · ' + hostOf(cfg.url) + '\n' + DISABLED_TIP
         + '\n\n最近一次：' + (detail || '—');
@@ -1506,16 +1484,10 @@
         dirty: dataDirty,
         quotaAt: quotaAt || 0,      // 回显给 Worker：额度用尽时它自己写不进 KV，只能靠页面记着
         warnMinutes: cfg.warn,
-        alertTypes: alertTypes(),
         timeZone: cfg.tz,
         rows: list
       };
       return JSON.stringify(extra ? Object.assign(body, extra) : body);
-    }
-
-    /** 当前启用的提醒方向，随快照一起同步给 Worker */
-    function alertTypes() {
-      return { full: !!cfg.warnFull, empty: !!cfg.warnEmpty };
     }
 
     function applyReply(data, httpStatus, forced) {
@@ -1525,11 +1497,21 @@
         return;
       }
 
-      // 409：另一个页面正占着 Worker，交给用户决定"导入旧数据"还是"用本地数据替换"
+      /* 409：Worker 归别的页面所有。两种处理由「本地数据优先」决定，不再弹窗问：
+         勾选 → 直接接管并上传本地数据（本地为准）
+         取消 → 改成从 Worker 拉取（Worker 为准）
+         注意 inClaim：接管后紧接着的那次 /sync 若仍被 409 拒绝，说明接管没生效，
+         这时必须报错退出，否则会"接管→同步→409→再接管"无限递归。 */
       if (httpStatus === 409 || (data && data.code === 'owner_mismatch')) {
-        blockedOwner = (data && data.owner && data.owner.host) || '另一个页面';
-        foreignRows = num(data && data.rows, 0);
-        askImport();
+        if (inClaim) {
+          setStatus('err', '接管未能生效 · Worker 仍归其他页面所有，请稍后重试');
+          return;
+        }
+        if (cfg.localFirst) {
+          claimReplace();
+        } else {
+          pullFromWorker(true);
+        }
         return;
       }
 
@@ -1565,41 +1547,20 @@
       }
       setQuotaAt(0);
 
-      /* 接管询问分两种情况，不要混在一起：
-         · 手动点了「立即同步」（forced=true）：用户主动要求，明确告诉他 Worker 上有
-           别的数据，由他决定导入还是保持只读。
-         · 自动同步：只在"本次会话第一次且本地本来就没有数据"时问一次。
-           快速新增/删除会连着触发多次同步，每次都判定就会反复弹框；
-           本地已经有数据时也没必要导入，那只会打断你正在做的事。
-         两种情况下如果用户选了"不导入"，readOnly 会置位，后续都不会再问。 */
-      const foreign = num(data.foreignRows, 0);
-      const claimingRecently = Date.now() - num(claimedAt, 0) < CLAIM_QUIET_MS;
-      if (foreign > 0) foreignRows = foreign;
-      const autoCheck = !foreignChecked && num(pendingLocalRows, 0) === 0;
-      foreignChecked = true;
-      if (foreign > 0 && !readOnly && (forced || autoCheck)
-        && !claimingRecently && declinedFor() !== clientId()) {
-        blockedOwner = (data.owner && data.owner.host) || '';
-        askImport();
+      if (data.lastPushOk === false && data.lastError) {
+        setStatus('err', '推送异常：' + data.lastError);
         return;
       }
 
-      if (data.lastPushOk === false && data.lastError) {
-        setStatus('err', '推送异常：' + data.lastError);
-      } else {
-        /* 只说"数据同步"这一件事：本轮推了几条、Worker 写没写、有没有顺带回收残留。
-           注意 foreign 是"Worker 手里不属于本页面的行数"，包含还没来得及回收的量，
-           所以措辞用"待回收"，不要写成"待接管"（那会让人以为还需要再操作一次）。 */
-        /* 只有"既没写、也没删"才算无改动。
-           删除走的是 removed 而不是 writes —— 只看 writes 会把"删掉一条"
-           误标成无改动，而删除恰恰改变了 Worker 上的数据。 */
-        const noChange = num(data.writes, 0) === 0 && num(data.removed, 0) === 0 && !forced;
-        const tail = foreign > 0
-          ? (claimingRecently ? '（另待回收 ' + foreign + ' 条旧数据）'
-            : '（Worker 上另有 ' + foreign + ' 条其它来源的数据）')
-          : (noChange ? '（无改动）' : '');
-        setStatus('ok', '已同步 ' + data.rows + ' 条' + tail);
-      }
+      /* 状态文案只说"这次同步了什么"，不再报条数与零碎标注：
+         · 带着产线改动 → 已同步产线
+         · 只有设置改动 → 已同步设置
+         · 都没变（刷新时的例行同步）→ 已同步
+         rowDirtyAtSync / cfgDirtyAtSync 在发起请求前就已定好，
+         这里不看响应里的写入计数 —— 计数受"哪些行变了"影响，读起来反而含糊。 */
+      if (rowDirtyAtSync) setStatus('ok', '已同步产线');
+      else if (cfgDirtyAtSync) setStatus('ok', '已同步设置');
+      else setStatus('ok', '已同步');
     }
 
     function num(v, dflt) {
@@ -1633,159 +1594,145 @@
     }
 
     /**
-     * 询问怎么处理 Worker 里已有的旧数据。三选一：
-     *   确定 → 导入旧数据到本页面（换域名时选这个）
-     *   确定后再问 → 用本页面数据替换（会清掉 Worker 上的旧数据）
-     *   取消 → 什么都不做，本页面保持只读（不推数据、也不接管）
+     * Worker 归别的页面所有时，把所有权抢过来并上传本地数据（本地优先）。
+     * mode=replace：先清掉 Worker 上的旧行，再用本页面数据同步。
      */
-    function askImport(manual) {
-      if (claiming) return;
-      setStatus('blocked',
-        '此页面还不是通知源' + (blockedOwner ? '（当前：' + blockedOwner + '）' : '')
-        + ' · Worker 里有 ' + foreignRows + ' 条其它页面的数据');
-
-      const head = manual
-        ? '把本页面设为唯一通知源？\n\n'
-        : ('检测到 Worker 里已有另一份数据'
-          + (blockedOwner ? '（来自 ' + blockedOwner + '）' : '')
-          + '，共 ' + foreignRows + ' 条。\n\n');
-
-      const useImport = confirm(
-        head
-        + '【确定】= 导入这份数据到本页面（推荐：换域名时选这个）\n'
-        + '【取消】= 不导入' + (manual ? '（放弃接管）' : '，本页面保持只读')
-      );
-
-      if (!useImport) {
-        // 记住"这次不导入"，避免每 60 秒再问一遍；真正的替换要用户明确选择
-        setDeclined(clientId());
-        readOnly = true;
-        setStatus('ok', '已按只读方式运行 · 需要时点「接管为通知源」 · Worker 上的旧数据会逐步自动清理');
-        return;
-      }
-
-      const useReplace = confirm(
-        '要在导入之前先清掉 Worker 上的旧数据吗？\n\n'
-        + '【取消】= 导入旧数据（推荐）\n'
-        + '【确定】= 不要旧数据，改用本页面的数据替换'
-      );
-      claimAndSync(useReplace ? 'replace' : 'import');
+    function claimReplace() {
+      if (inClaim) return Promise.resolve();
+      inClaim = true;
+      setStatus('save', '正在接管为通知源…');
+      return fetch(base() + '/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Sync-Token': cfg.token },
+        body: JSON.stringify({ clientId: clientId(), clientHost: location.host, mode: 'replace' })
+      }).then(function (r) {
+        return readJson(r).then(function (j) {
+          if (r.status !== 200 || !j || j.ok !== 1) {
+            throw new Error((j && j.message) || ('接管失败 HTTP ' + r.status));
+          }
+          // 接管成功后立刻把本地数据推上去（强制，因为行已经在 Worker 侧被清空了）
+          return fetch(base() + '/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Sync-Token': cfg.token },
+            body: buildPayload({ dirty: true })
+          }).then(function (r2) {
+            return readJson(r2).then(function (j2) { return applyReply(j2, r2.status, true); });
+          });
+        });
+      }).catch(function (e) {
+        setStatus('err', '接管失败：' + ((e && e.message) ? e.message : e));
+      }).then(function () {
+        inClaim = false;
+      });
     }
 
     /**
-     * 接管为通知源。
-     *   import  → 先把 Worker 的旧数据取回本页面，再接管
-     *   replace → 先接管并清掉旧数据，再用本页面数据同步
+     * 从 Worker 拉取数据覆盖本地（Worker 优先）。
+     * 只读模式：拉完就不推，避免把别的设备的数据改掉。
      */
-    function claimAndSync(mode) {
-      if (claiming || !ready()) return;
-      claiming = true;
-      readOnly = false;
-      claimedAt = Date.now();
-      markClaimed();     // 接管后一段时间内不再追问导入
-      setStatus('save', mode === 'import' ? '正在导入 Worker 数据…' : '正在替换为本地数据…');
-      setDeclined('');   // 新的选择，清掉旧的"不导入"记忆
-
-      const afterClaim = function () {
-        return fetch(base() + '/sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Sync-Token': cfg.token },
-          body: buildPayload()
-        }).then(function (r) { return readJson(r).then(function (j) { return applyReply(j, r.status); }); });
-      };
-
-      const doClaim = function () {
-        return fetch(base() + '/claim', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Sync-Token': cfg.token },
-          body: JSON.stringify({ clientId: clientId(), clientHost: location.host, mode: mode })
-        }).then(function (r) {
-          return readJson(r).then(function (j) {
-            if (r.status !== 200 || !j || j.ok !== 1) {
-              throw new Error((j && j.message) || ('接管失败 HTTP ' + r.status));
-            }
-            return j;
+    function pullFromWorker(manual) {
+      pulledThisSession = true;
+      setStatus('save', '正在从 Worker 拉取数据…');
+      return fetch(base() + '/snapshot', { headers: { 'X-Sync-Token': cfg.token } })
+        .then(readJson)
+        .then(function (j) {
+          if (!j || j.ok !== 1) throw new Error((j && j.message) || '拉取失败');
+          const list = Array.isArray(j.rows) ? j.rows : [];
+          if (!list.length) {
+            setStatus('ok', 'Worker 里没有数据 · 本页只读，不会上传');
+            return;
+          }
+          rows = list.map(function (r) {
+            return {
+              id: String(r.id),
+              name: r.name,
+              remark: typeof r.remark === 'string' ? r.remark : '',
+              region: r.region === 'gudi' ? 'gudi' : 'wuling',
+              prod: Number(r.prod) || 0,
+              cons: Number(r.cons) || 0,
+              stock: Math.max(0, Math.floor(Number(r.stock) || 0)),
+              ts: Number(r.ts) || Date.now(),
+              editing: false
+            };
           });
-        });
-      };
-
-      const pull = function () {
-        return fetch(base() + '/snapshot', { headers: { 'X-Sync-Token': cfg.token } })
-          .then(readJson)
-          .then(function (j) {
-            if (!j || j.ok !== 1) throw new Error((j && j.message) || '导出失败');
-            if (!j.rows || !j.rows.length) return false;
-            // 以 Worker 里的锚点为准写入本页面，刷新后由 render() 正常渲染
-            rows = j.rows.map(function (r) {
-              return {
-                id: String(r.id),
-                name: r.name,
-                remark: typeof r.remark === 'string' ? r.remark : '',
-                region: r.region === 'gudi' ? 'gudi' : 'wuling',
-                prod: Number(r.prod) || 0,
-                cons: Number(r.cons) || 0,
-                stock: Math.max(0, Math.floor(Number(r.stock) || 0)),
-                ts: Number(r.ts) || Date.now(),
-                editing: false
-              };
-            });
-            save();
-            return true;
-          });
-      };
-
-      const flow = mode === 'import'
-        ? pull().then(function (got) {
-            if (!got) setStatus('save', 'Worker 里没有可导入的数据，改用本地数据…');
-            return doClaim().then(function () { return got; });
-          })
-        : doClaim().then(function () { return false; });
-
-      flow.then(function (imported) {
-        if (imported) {
-          location.reload();      // 载入导入的数据，走一遍正常的加载路径
-          return null;
-        }
-        return afterClaim();
-      })
-        .catch(function (e) {
-          setStatus('err', (e && e.message) ? e.message : String(e));
+          save();
+          render();
+          // 拉下来的内容就是 Worker 的内容，记成已同步，避免立刻又被判为"有改动"
+          dataDirty = false;
+          syncedSnapshot = rowsSnapshot();
+          try { localStorage.setItem(SYNC_SNAP_KEY, syncedSnapshot); } catch (e) { /* 忽略 */ }
+          setStatus('ok', '已从 Worker 拉取 ' + rows.length + ' 条 · 本页只读');
         })
-        .then(function () { claiming = false; });
+        .catch(function (e) {
+          setStatus('err', (manual ? '拉取失败：' : '无法连接 Worker：') + ((e && e.message) ? e.message : e));
+        });
     }
 
+    /**
+     * 发起一次同步。
+     * force=true（手动点「立即同步」）不做差异检查，强制把全部数据推上去。
+     *
+     * 关于"缓冲"：这里做两层合并，避免密集操作打出多个请求 ——
+     *   ① scheduleSync 用 clearTimeout 覆盖等待中的计时器（快速连续操作只保留最后一次）
+     *   ② sending 在途标志：请求还没回来时再要同步，只记一个 queued，
+     *      等它回来再补发一次，而不是并发再开一个。
+     */
     function syncNow(force) {
       if (!enabled()) {
         setStatus(cfg.on ? 'err' : 'off', cfg.on ? '未填写 Worker 地址或同步令牌' : '未开启 · 数据只保存在本机');
         return Promise.resolve();
       }
-      if (claiming) return Promise.resolve();
-      // 只读（用户选了"不导入"）只约束**自动**同步；手动点「立即同步」是明确指令，
-      // 照常发出去 —— 结果要么被 Worker 以 409 拒绝（会给出去向），要么真的推成功。
-      if (readOnly && !force) return Promise.resolve();
-      /* force=true（手动点「立即同步」）不走差异检查：用户明确要求推送，就照推。
-         自动同步则用 dataDirty 的真实值 —— 它由 save() 按内容比对得出。
-         注意不能写成 (force || !readOnly)：!readOnly 在非只读时恒为 true，
-         那样 dirty 永远是 true，"无改动就不写 KV"的优化会彻底失效。 */
+
+      // Worker 优先模式：本页不上传，只在会话第一次把 Worker 的数据拉下来
+      if (!cfg.localFirst && !force) {
+        if (pulledThisSession) return Promise.resolve();
+        return pullFromWorker(false);
+      }
+
+      // 在途：记下来，等当前这次结束后补发，避免并发请求互相覆盖
+      if (sending) {
+        queued = true;
+        return Promise.resolve();
+      }
+      sending = true;
+
+      /* force 时强制 dirty；自动同步用 dataDirty 的真实值（由 save() 按内容比对得出）。
+         写成 (force || !localFirst) 会让 dirty 恒为 true，"无改动就不写 KV"的优化就失效了。 */
       const dirty = force ? true : dataDirty;
-      setStatus('save', force ? '正在推送全部数据…' : '正在同步…');
+      // 状态文案要在发请求前定好：本轮带的是产线改动还是只有设置改动
+      rowDirtyAtSync = dirty;
+      cfgDirtyAtSync = cfgDirty;
+      setStatus('save', force ? '正在上传产线…' : '正在同步…');
+
       return fetch(base() + '/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Sync-Token': cfg.token },
         body: buildPayload({ dirty: dirty })
       }).then(function (r) { return readJson(r).then(function (j) { return applyReply(j, r.status, force); }); })
-        .catch(function (e) { setStatus('err', '无法连接 Worker：' + (e && e.message ? e.message : e)); });
+        .catch(function (e) { setStatus('err', '无法连接 Worker：' + (e && e.message ? e.message : e)); })
+        .then(function () {
+          sending = false;
+          if (cfgDirtyAtSync && status === 'ok') cfgDirty = false;
+          if (queued) {
+            queued = false;
+            return syncNow(false);
+          }
+        });
     }
 
     function scheduleSync(delay) {
       if (!enabled()) return;
+      /* Worker 优先模式是"只读视图"：自动同步一律不发。
+         否则用户刚改完内容，自动同步又会把 Worker 的旧数据覆盖回来，
+         看起来像"改了没用"。要拉最新数据就手动点「立即同步」。 */
+      if (!cfg.localFirst) return;
       clearTimeout(syncTimer);
       syncTimer = setTimeout(function () { syncNow(false); }, typeof delay === 'number' ? delay : 1500);
     }
 
     function beacon() {
-      // 只有"确实有未同步的改动"时才在离开页面时补推；只读状态完全不碰 Worker
-      if (!enabled() || readOnly || !dataDirty || !navigator.sendBeacon) return;
+      // 只有"确实有未同步的产线改动"时才在离开页面时补推；只读模式完全不碰 Worker
+      if (!enabled() || !cfg.localFirst || !dataDirty || !navigator.sendBeacon) return;
       try {
         navigator.sendBeacon(base() + '/sync',
           new Blob([buildPayload({ dirty: true })], { type: 'application/json' }));
@@ -1793,20 +1740,27 @@
     }
 
     function refreshCfg() {
+      const before = cfgSnap();
       cfg.url = normalizeUrl(urlEl.value);
       cfg.token = String(tokenEl.value || '').trim();
       const w = parseInt(warnEl.value, 10);
       cfg.warn = (Number.isFinite(w) && w > 0) ? w : 30;
       cfg.on = !!onEl.checked;
-      cfg.warnFull = !!fullEl.checked;
-      cfg.warnEmpty = !!emptyEl.checked;
+      cfg.localFirst = !!localFirstEl.checked;
       const tz = Number(tzEl.value);
       cfg.tz = (Number.isFinite(tz) && tz >= -12 && tz <= 14) ? tz : TZ_DEFAULT;
       // 时区变了，本地推算的额度重置文案要作废，改用新时区重算
       serverQuotaReset = '';
       // 把补全后的地址回填到输入框，让用户看到实际会请求到哪里
       if (urlEl.value !== cfg.url) urlEl.value = cfg.url;
+      // 记下"设置有没有真的变过"，用来决定同步状态显示"已同步设置"还是"已同步"
+      if (cfgSnap() !== before) cfgDirty = true;
       persist();
+    }
+
+    /** 参与同步的设置项指纹（地址与令牌不算"要同步的设置"） */
+    function cfgSnap() {
+      return [cfg.warn, cfg.on ? 1 : 0, cfg.localFirst ? 1 : 0, cfg.tz].join('|');
     }
 
     function onEditingChange() {
@@ -1831,12 +1785,24 @@
       });
     });
 
-    [onEl, fullEl, emptyEl, tzEl].forEach(function (el) {
+    [onEl, localFirstEl, tzEl].forEach(function (el) {
       el.addEventListener('change', function () {
         refreshCfg();
         if (!cfg.on) { clearTimeout(syncTimer); setStatus('off', '未开启 · 数据只保存在本机'); return; }
         if (!ready()) { setStatus('err', '未填写 Worker 地址或同步令牌'); return; }
-        scheduleSync(200);   // 提醒方向或时区变了，把设置同步给 Worker
+        if (el === localFirstEl) {
+          // 切换方向后本会话的"已拉取"状态要重置，否则可能一直不生效
+          pulledThisSession = false;
+          if (cfg.localFirst) {
+            setStatus('idle', '已改为本地数据优先，正在上传…');
+            scheduleSync(200);
+          } else {
+            // 切到"Worker 优先"要立刻拉一次，让人看到 Worker 上的数据
+            pullFromWorker(true);
+          }
+          return;
+        }
+        scheduleSync(200);
       });
     });
 
@@ -1855,16 +1821,13 @@
 
     nowBtn.addEventListener('click', function () {
       refreshCfg();
+      if (!cfg.localFirst) {
+        // Worker 优先模式下「立即同步」= 重新拉一次
+        pulledThisSession = false;
+        pullFromWorker(true);
+        return;
+      }
       syncNow(true);      // 手动同步：不做差异检查，强制推一次
-    });
-
-    /* 接管为通知源：走与自动询问同一套三选一流程。
-       用户主动点击 = 明确想反悔，所以先清掉"已决定不导入"的标记。 */
-    claimBtn.addEventListener('click', function () {
-      refreshCfg();
-      if (!ready()) { setStatus('err', '请先填写 Worker 地址与同步令牌'); return; }
-      setDeclined('');
-      askImport(true);
     });
 
     resetBtn.addEventListener('click', function () {
@@ -1897,12 +1860,8 @@
     warnEl.value = String(cfg.warn);
     tzEl.value = String(cfg.tz);
     onEl.checked = cfg.on;
-    claimedAt = readClaimTs();
+    localFirstEl.checked = cfg.localFirst;
     quotaAt = readQuotaAt();
-    // 记下"加载时本地有几条"：为空才在首次同步时问要不要导入 Worker 上的数据
-    pendingLocalRows = rows.length;
-    fullEl.checked = cfg.warnFull;
-    emptyEl.checked = cfg.warnEmpty;
     setStatus(
       quotaAt ? 'err' : (cfg.on ? (ready() ? 'idle' : 'err') : 'off'),
       quotaAt
@@ -1912,12 +1871,19 @@
 
     // 没有心跳定时器：挂机时不发任何请求。
     // 同步发生在这些时刻：进入页面/刷新时一次、确认修改退出编辑态、删除条目、
-    // 改动通知设置、点了「立即同步 / 接管 / 测试」。
+    // 改动通知设置、点了「立即同步 / 测试」。
     // 进入页面这次无论有没有改动都发：一是让状态灯有个确定结果（否则会一直停在
-    // "等待首次同步…"），二是新页面要认领数据源、并发现 Worker 上的别处数据。
+    // "等待首次同步…"），二是首次同步会顺带发现"Worker 归别的页面所有"这种情况。
     // 没改动时 dataDirty=false，Worker 收到后一个键都不写，只消耗一次读。
-    // 只读、或本地本来就没有数据（纯新建）时不发，避免制造空快照事故。
-    if (enabled() && !readOnly && rows.length) scheduleSync(1500);
+    // 本地没有数据（纯新建）时不发，避免制造空快照事故。
+    if (enabled()) {
+      if (cfg.localFirst) {
+        if (rows.length) scheduleSync(1500);
+      } else {
+        // Worker 优先：进入页面就把 Worker 的数据拉下来（即使本地是空的也要拉）
+        pullFromWorker(false);
+      }
+    }
 
     window.addEventListener('pagehide', beacon);
 
@@ -1932,7 +1898,7 @@
       state: function () {
         return {
           status: status, detail: detail,
-          warnMinutes: cfg.warn, warnEmpty: cfg.warnEmpty, enabled: enabled()
+          warnMinutes: cfg.warn, localFirst: cfg.localFirst, enabled: enabled()
         };
       }
     };

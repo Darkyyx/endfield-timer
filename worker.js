@@ -88,11 +88,9 @@ function projectStock(row, now) {
  *   1 = 即将爆仓   2 = 已爆仓
  *   3 = 即将耗尽   4 = 已耗尽
  * 注意：产销平衡（net = 0）一律返回 0。刚添加、还没填数据的行也返回 0。
- * types 用来按方向开关：{ full, empty }，关掉的方向直接返回 0（不提醒也不占水位）。
+ * 爆仓与耗尽两个方向始终都提醒（曾经有过按方向开关的配置，实际很少有人用，已去掉）。
  */
-function evaluateLevel(row, now, warnSeconds, types) {
-  const t = types || { full: true, empty: true };
-
+function evaluateLevel(row, now, warnSeconds) {
   // 刚点「添加产物」、三项都是 0 的空行：不参与提醒
   if (num(row.stock) === 0 && num(row.prod) === 0 && num(row.cons) === 0) return 0;
 
@@ -105,13 +103,10 @@ function evaluateLevel(row, now, warnSeconds, types) {
   const stock = projectStock(row, now);
 
   if (net > 0) {
-    if (!t.full) return 0;
     if (stock >= cap) return 2;
     if (stock + net * warnSeconds / 60 >= cap) return 1;
     return 0;
   }
-
-  if (!t.empty) return 0;
 
   if (stock <= 0) return 4;
   if (stock + net * warnSeconds / 60 <= 0) return 3;
@@ -326,20 +321,15 @@ function checkToken(request, env) {
 }
 
 /**
- * 读取前端下发的运行配置（预警窗口 + 提醒方向）。
+ * 读取前端下发的运行配置（预警窗口 + 展示时区）。
  * KV 里的值是权威（页面改设置时会同步过来），缺失时退回 Worker 自己的默认值。
  */
 async function effectiveConfig(env, cfg) {
   const meta = (await env.STATE.get('meta:config', 'json')) || {};
   const m = num(meta.warnMinutes);
-  const at = meta.alertTypes && typeof meta.alertTypes === 'object' ? meta.alertTypes : {};
   return {
     warnSeconds: m > 0 ? Math.min(720, m) * 60 : num(cfg.WARN_SECONDS),
-    types: {
-      full: at.full !== false,
-      empty: at.empty !== false
-    },
-    // 展示用时区（IANA 标识符）。meta 里没有就用 Worker 环境变量，再没有就默认上海。
+    // 展示用时区（小时偏移）。meta 里没有就用 Worker 环境变量，再没有就默认 +8。
     timeZone: tzOffset(
       (meta.timeZone != null && meta.timeZone !== '') ? meta.timeZone
         : ((cfg.TIME_ZONE != null && cfg.TIME_ZONE !== '') ? cfg.TIME_ZONE : DEFAULT_TZ)),
@@ -483,28 +473,20 @@ async function handleSync(request, env, cfg) {
     }
   }
 
-  // 前端设置面板里的"预警提前量""提醒方向""展示时区"以这里为准，避免两处配置打架
+  // 前端设置面板里的"预警时间""展示时区"以这里为准，避免两处配置打架
   const warnMinutes = num(body && body.warnMinutes);
-  const at = (body && body.alertTypes) || null;
   // 只要页面明确带了 timeZone 字段就采纳（越界值由 tzOffset 规范成默认值）；
   // 只有完全没带这个字段时才保留原值，这样旧版页面不会把已设置的时区清掉。
   const tzGiven = !!(body && body.timeZone != null && body.timeZone !== '');
-  if (warnMinutes > 0 || at || tzGiven) {
+  if (warnMinutes > 0 || tzGiven) {
     const prev = (await env.STATE.get('meta:config', 'json')) || {};
     const next = {
       warnMinutes: warnMinutes > 0 ? Math.min(720, warnMinutes) : num(prev.warnMinutes) || 30,
-      alertTypes: at
-        ? { full: at.full !== false, empty: at.empty !== false }
-        : (prev.alertTypes || { full: true, empty: true }),
       // 时区只在页面明确上报时覆盖；缺失时保留原值，避免旧版页面把设置清掉
       timeZone: tzGiven ? tzOffset(body.timeZone) : (prev.timeZone != null ? prev.timeZone : undefined)
     };
     // 只有真的变了才写，避免每次心跳都消耗一次写入额度
-    if (next.warnMinutes !== num(prev.warnMinutes)
-      || next.timeZone !== prev.timeZone
-      || !prev.alertTypes
-      || next.alertTypes.full !== prev.alertTypes.full
-      || next.alertTypes.empty !== prev.alertTypes.empty) {
+    if (next.warnMinutes !== num(prev.warnMinutes) || next.timeZone !== prev.timeZone) {
       next.updatedAt = Date.now();
       await safePut(env, [{ key: 'meta:config', value: JSON.stringify(next) }]);
     }
@@ -611,7 +593,6 @@ async function handleSync(request, env, cfg) {
       key: 'meta:config',
       value: JSON.stringify({
         warnMinutes: num(cfg && cfg.WARN_SECONDS) > 0 ? Math.round(num(cfg.WARN_SECONDS) / 60) : 30,
-        alertTypes: (cfgMeta && cfgMeta.types) || { full: true, empty: true },
         timeZone: cfgMeta ? cfgMeta.timeZone : undefined,
         lastQuotaAt: 0,
         updatedAt: Date.now()
@@ -743,7 +724,7 @@ async function handleState(request, env, cfg) {
   if (!checkToken(request, env)) return json({ ok: 0, message: '令牌错误' }, 401);
 
   const now = Date.now();
-  const { warnSeconds, types, timeZone } = await effectiveConfig(env, cfg);
+  const { warnSeconds, timeZone } = await effectiveConfig(env, cfg);
   const out = [];
   const list = await env.STATE.list({ prefix: 'row:' });
   for (const k of list.keys) {
@@ -756,7 +737,7 @@ async function handleState(request, env, cfg) {
       region: row.region,
       alerted: num(row.alerted),
       misses: num(row.misses),
-      level: evaluateLevel(row, now, warnSeconds, types),
+      level: evaluateLevel(row, now, warnSeconds),
       stock: Math.round(projectStock(row, now))
     });
   }
@@ -928,7 +909,7 @@ async function runPatrol(env, cfg) {
   }
 
   const now = Date.now();
-  const { warnSeconds, types, timeZone } = await effectiveConfig(env, cfg);
+  const { warnSeconds, timeZone } = await effectiveConfig(env, cfg);
   const retryCooldown = num(cfg.PUSH_RETRY_COOLDOWN_MS);
 
   const list = await env.STATE.list({ prefix: 'row:' });
@@ -939,7 +920,7 @@ async function runPatrol(env, cfg) {
     const row = await env.STATE.get(k.name, 'json');
     if (!row) continue;
 
-    const level = evaluateLevel(row, now, warnSeconds, types);
+    const level = evaluateLevel(row, now, warnSeconds);
     const decision = decideAlert(row, level);
 
     if (!decision) continue;
