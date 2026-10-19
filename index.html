@@ -1715,7 +1715,8 @@
           if (cfgDirtyAtSync && status === 'ok') cfgDirty = false;
           if (queued) {
             queued = false;
-            return syncNow(false);
+            // 合并后的补发只在"确实还有东西要发"时做，否则纯属浪费一次请求
+            if (dataDirty || cfgDirty) return syncNow(false);
           }
         });
     }
